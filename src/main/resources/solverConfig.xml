@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<solver>
+    <!-- Define the planning entities and solution -->
+    <solutionClass>com.example.preschoolschedulingapp.model.Schedule</solutionClass>
+    <entityClass>com.example.preschoolschedulingapp.model.Teacher</entityClass>
+
+    <!-- Score calculation configuration -->
+    <scoreDirectorFactory>
+        <constraintProviderClass>com.example.preschoolschedulingapp.solver.ScheduleConstraintProvider</constraintProviderClass>
+    </scoreDirectorFactory>
+
+    <!-- Termination settings -->
+    <termination>
+        <secondsSpentLimit>60</secondsSpentLimit>
+    </termination>
+</solver>
