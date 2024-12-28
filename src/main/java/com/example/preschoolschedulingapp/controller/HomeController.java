@@ -1,9 +1,6 @@
 package com.example.preschoolschedulingapp.controller;
 
-import com.example.preschoolschedulingapp.model.Entry;
-import com.example.preschoolschedulingapp.model.Room;
-import com.example.preschoolschedulingapp.model.Schedule;
-import com.example.preschoolschedulingapp.model.Teacher;
+import com.example.preschoolschedulingapp.model.*;
 import com.example.preschoolschedulingapp.repository.RoomRepository;
 import com.example.preschoolschedulingapp.repository.ScheduleRepository;
 import com.example.preschoolschedulingapp.repository.TeacherRepository;
@@ -13,6 +10,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -296,7 +294,86 @@ public class HomeController {
         return "redirect:/viewSchedules";
     }
 
+    @GetMapping("/generateSchedule/{scheduleId}")
+    public String generateSchedule(@PathVariable Long scheduleId, Model model) {
+        Schedule schedule = scheduleRepository.findById(scheduleId)
+                .orElseThrow(() -> new IllegalArgumentException("Schedule not found with id: " + scheduleId));
+        List<Room> rooms = (List<Room>) roomRepository.findAll();
+        List<Teacher> teachers = (List<Teacher>) teacherRepository.findAll();
 
+        Map<String, List<Teacher>> roomAssignments = new HashMap<>();
+        List<Teacher> teachersOnBreak = calculateBreaks(teachers);
+
+        for (Entry entry : schedule.getEntries()) {
+            List<Teacher> availableTeachers = findAvailableTeachers(teachers, entry.getTimeSlot());
+            List<Teacher> assignedTeachers = assignTeachers(availableTeachers, entry.getTeachersRequired(), entry.getTimeSlot());
+            roomAssignments.put(entry.getRoomId() + "_" + entry.getTimeSlot(), assignedTeachers);
+        }
+
+        model.addAttribute("schedule", schedule); // Pass the full schedule object
+        model.addAttribute("rooms", rooms);
+        model.addAttribute("scheduleWithAssignments", roomAssignments);
+        model.addAttribute("breaks", teachersOnBreak);
+        model.addAttribute("timeSlots", generateTimeSlots());
+
+        return "generateSchedule";
+    }
+
+
+    private List<Teacher> calculateBreaks(List<Teacher> teachers) {
+        List<Teacher> teachersOnBreak = new ArrayList<>();
+        LocalTime now = LocalTime.now();
+
+        for (Teacher teacher : teachers) {
+            if (requiresBreak(teacher, now)) {
+                teachersOnBreak.add(teacher);
+            }
+        }
+        return teachersOnBreak;
+    }
+
+    private boolean requiresBreak(Teacher teacher, LocalTime currentTime) {
+        long minutesSinceStart = teacher.getStartTime().until(currentTime, ChronoUnit.MINUTES);
+
+        if (minutesSinceStart >= 300 && minutesSinceStart % 300 < 10) {
+            return true; // Teacher needs a 30-minute break after 5 hours
+        }
+
+        if (minutesSinceStart >= 210 && minutesSinceStart % 210 < 10) {
+            return true; // Teacher needs a 10-minute break after 3.5 hours
+        }
+
+        return false;
+    }
+
+    private List<Teacher> assignTeachers(List<Teacher> availableTeachers, int requiredTeachers, String timeSlot) {
+        List<Teacher> assignedTeachers = new ArrayList<>();
+        for (Teacher teacher : availableTeachers) {
+            if (assignedTeachers.size() < requiredTeachers) {
+                assignedTeachers.add(teacher);
+            } else {
+                break;
+            }
+        }
+        return assignedTeachers;
+    }
+
+    private List<Teacher> findAvailableTeachers(List<Teacher> teachers, String timeSlot) {
+        List<Teacher> availableTeachers = new ArrayList<>();
+        for (Teacher teacher : teachers) {
+            if (isTeacherAvailable(teacher, timeSlot)) {
+                availableTeachers.add(teacher);
+            }
+        }
+        return availableTeachers;
+    }
+
+    private boolean isTeacherAvailable(Teacher teacher, String timeSlotString) {
+        TimeSlot timeSlot = TimeSlot.fromString(timeSlotString);
+
+        return !teacher.getStartTime().isAfter(timeSlot.getStart()) &&
+                !teacher.getEndTime().isBefore(timeSlot.getEnd());
+    }
     private List<String> generateTimeSlots() {
         List<String> timeSlots = new ArrayList<>();
         LocalTime startTime = LocalTime.of(7, 30); // Start at 7:30 AM

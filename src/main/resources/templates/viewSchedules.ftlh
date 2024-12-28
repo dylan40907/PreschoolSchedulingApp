@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<html lang="en">
 <head>
     <title>Schedules</title>
 </head>
@@ -9,6 +10,7 @@
     <thead>
     <tr>
         <th>Schedule Name</th>
+        <th>Actions</th>
     </tr>
     </thead>
     <tbody>
@@ -17,12 +19,19 @@
             <td>
                 <a href="/editSchedule/${schedule.id}">${schedule.name}</a>
             </td>
+            <td>
+                <!-- Edit and Generate Schedule Buttons -->
+                <form action="/generateSchedule/${schedule.id}" method="get" style="display: inline;">
+                    <button type="submit">Generate Schedule</button>
+                </form>
+                <form action="/deleteSchedule/${schedule.id}" method="post" onsubmit="return confirm('Are you sure you want to delete this schedule?');" style="display: inline;">
+                    <button type="submit" style="color: red;">Delete</button>
+                </form>
+            </td>
         </tr>
     </#list>
     </tbody>
 </table>
 <a href="/newSchedule">Create a New Schedule</a>
-<br>
-<a href="/generateSchedule">Generate a Schedule</a>
 </body>
 </html>
