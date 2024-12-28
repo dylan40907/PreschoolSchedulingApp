@@ -15,15 +15,15 @@ public class Schedule {
     private String name;
 
 
-    @ElementCollection
-    private Map<String, String> entries; // Key: "roomId_timeSlot", Value: "Event Name"
+    @OneToMany(mappedBy = "schedule", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<Entry> entries;
 
     @OneToMany(mappedBy = "schedule", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<Room> rooms;
 
     public Schedule() {}
 
-    public Schedule(String name, Map<String, String> entries) {
+    public Schedule(String name, List<Entry> entries) {
         this.name = name;
         this.entries = entries;
     }
@@ -45,11 +45,11 @@ public class Schedule {
         this.name = name;
     }
 
-    public Map<String, String> getEntries() {
+    public List<Entry> getEntries() {
         return entries;
     }
 
-    public void setEntries(Map<String, String> entries) {
+    public void setEntries(List<Entry> entries) {
         this.entries = entries;
     }
 }

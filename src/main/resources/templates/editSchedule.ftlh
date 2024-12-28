@@ -24,10 +24,53 @@
                 <td>${timeSlot}</td>
                 <#list rooms as room>
                     <td>
-                        <input type="text"
-                               name="entries[${room.id}_${timeSlot}]"
-                               value="${entries['entries[' + room.id + '_' + timeSlot + ']']!''}"
-                               placeholder="Enter class/event">
+                        <#assign entryFound = false />
+                        <#list entries as entry>
+                            <#if entry.roomId == room.id?string && entry.timeSlot == timeSlot>
+                                <!-- Event Name -->
+                                <label>
+                                    Event:
+                                    <input type="text"
+                                           name="entries[${room.id}_${timeSlot}].eventName"
+                                           value="${entry.eventName!}"
+                                           placeholder="Enter class/event"
+                                           >
+                                </label>
+                                <br>
+                                <!-- Teachers Required -->
+                                <label>
+                                    Teachers Required:
+                                    <input type="number"
+                                           name="entries[${room.id}_${timeSlot}].teachersRequired"
+                                           value="${entry.teachersRequired!0}"
+                                           min="0"
+                                           placeholder="Number of teachers"
+                                           >
+                                </label>
+                                <br>
+                                <#assign entryFound = true />
+                            </#if>
+                        </#list>
+                        <!-- Empty Inputs for Missing Entries -->
+                        <#if !entryFound>
+                            <label>
+                                Event:
+                                <input type="text"
+                                       name="entries[${room.id}_${timeSlot}].eventName"
+                                       placeholder="Enter class/event"
+                                       >
+                            </label>
+                            <br>
+                            <label>
+                                Teachers Required:
+                                <input type="number"
+                                       name="entries[${room.id}_${timeSlot}].teachersRequired"
+                                       min="0"
+                                       placeholder="Number of teachers"
+                                       >
+                            </label>
+                            <br>
+                        </#if>
                     </td>
                 </#list>
             </tr>

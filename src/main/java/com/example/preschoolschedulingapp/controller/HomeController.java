@@ -1,5 +1,6 @@
 package com.example.preschoolschedulingapp.controller;
 
+import com.example.preschoolschedulingapp.model.Entry;
 import com.example.preschoolschedulingapp.model.Room;
 import com.example.preschoolschedulingapp.model.Schedule;
 import com.example.preschoolschedulingapp.model.Teacher;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.*;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -134,17 +136,71 @@ public class HomeController {
     @GetMapping("/newSchedule")
     public String newSchedule(Model model) {
         List<Room> rooms = (List<Room>) roomRepository.findAll();
+        List<Teacher> teachers = (List<Teacher>) teacherRepository.findAll(); // Fetch teachers
+
         model.addAttribute("rooms", rooms);
+        model.addAttribute("teachers", teachers); // Add teachers to the model
         model.addAttribute("timeSlots", generateTimeSlots());
         return "newSchedule";
     }
 
+
     @PostMapping("/newSchedule")
-    public String saveSchedule(@RequestParam String scheduleName, @RequestParam Map<String, String> entries) {
-        Schedule schedule = new Schedule(scheduleName, entries);
+    public String saveSchedule(
+            @RequestParam String scheduleName,
+            @RequestParam Map<String, String> eventNames,
+            @RequestParam Map<String, String> teachersRequired
+    ) {
+        Schedule schedule = new Schedule();
+        schedule.setName(scheduleName);
+
+        List<Entry> entries = new ArrayList<>();
+        // Create a map to group keys by roomId and timeSlot
+        Map<String, Entry> entryMap = new HashMap<>();
+
+        for (String key : eventNames.keySet()) {
+            String[] parts = key.split("_");
+            if (parts.length < 2) {
+                System.err.println("Invalid key format: " + key);
+                continue;
+            }
+
+            String roomId = parts[0].replace("entries[", "");
+            String timeSlot = parts[1].replace("].eventName", "").replace("].teachersRequired", "");
+
+            // Create a unique identifier for grouping (roomId + timeSlot)
+            String entryKey = roomId + "_" + timeSlot;
+
+            // Fetch or create an Entry object for this grouping
+            Entry entry = entryMap.getOrDefault(entryKey, new Entry());
+            entry.setRoomId(roomId);
+            entry.setTimeSlot(timeSlot);
+            entry.setSchedule(schedule);
+
+            // Update the entry based on the current key
+            if (key.endsWith(".eventName")) {
+                entry.setEventName(eventNames.get(key));
+            } else if (key.endsWith(".teachersRequired")) {
+                try {
+                    entry.setTeachersRequired(Integer.parseInt(teachersRequired.get(key)));
+                } catch (NumberFormatException e) {
+                    entry.setTeachersRequired(0); // Default value
+                }
+            }
+
+            // Put the updated entry back into the map
+            entryMap.put(entryKey, entry);
+        }
+
+// Add all entries from the map to the list
+        entries.addAll(entryMap.values());
+
+        schedule.setEntries(entries);
         scheduleRepository.save(schedule);
         return "redirect:/viewSchedules";
     }
+
+
 
     @GetMapping("/viewSchedules")
     public String viewSchedules(Model model) {
@@ -157,6 +213,16 @@ public class HomeController {
     public String editSchedule(@PathVariable Long id, Model model) {
         Schedule schedule = scheduleRepository.findById(id).orElseThrow();
         List<Room> rooms = (List<Room>) roomRepository.findAll();
+
+        // Debugging: Log schedule details and entries
+        System.out.println("Editing Schedule: " + schedule.getName());
+        for (Entry entry : schedule.getEntries()) {
+            System.out.println("Entry: RoomId=" + entry.getRoomId()
+                    + ", TimeSlot=" + entry.getTimeSlot()
+                    + ", EventName=" + entry.getEventName()
+                    + ", TeachersRequired=" + entry.getTeachersRequired());
+        }
+
         model.addAttribute("rooms", rooms);
         model.addAttribute("schedule", schedule);
         model.addAttribute("entries", schedule.getEntries());
@@ -164,34 +230,70 @@ public class HomeController {
         return "editSchedule";
     }
 
+
     @PostMapping("/editSchedule/{id}")
-    public String updateSchedule(@PathVariable Long id, @RequestParam Map<String, String> entries) {
+    public String updateSchedule(
+            @PathVariable Long id,
+            @RequestParam Map<String, String> eventNames,
+            @RequestParam Map<String, String> teachersRequired
+    ) {
+        // Fetch the existing schedule or throw an exception if not found
         Schedule schedule = scheduleRepository.findById(id).orElseThrow();
-        schedule.setEntries(entries);
+
+        // Create a map to group keys by roomId and timeSlot
+        Map<String, Entry> entryMap = new HashMap<>();
+
+        for (String key : eventNames.keySet()) {
+            String[] parts = key.split("_");
+            if (parts.length < 2) {
+                System.err.println("Invalid key format: " + key);
+                continue;
+            }
+
+            String roomId = parts[0].replace("entries[", "");
+            String timeSlot = parts[1].replace("].eventName", "").replace("].teachersRequired", "");
+
+            // Create a unique identifier for grouping (roomId + timeSlot)
+            String entryKey = roomId + "_" + timeSlot;
+
+            // Fetch or create an Entry object for this grouping
+            Entry entry = entryMap.getOrDefault(entryKey, new Entry());
+            entry.setRoomId(roomId);
+            entry.setTimeSlot(timeSlot);
+            entry.setSchedule(schedule);
+
+            // Update the entry based on the current key
+            if (key.endsWith(".eventName")) {
+                entry.setEventName(eventNames.get(key));
+            } else if (key.endsWith(".teachersRequired")) {
+                try {
+                    entry.setTeachersRequired(Integer.parseInt(teachersRequired.get(key)));
+                } catch (NumberFormatException e) {
+                    entry.setTeachersRequired(0); // Default value
+                }
+            }
+
+            // Put the updated entry back into the map
+            entryMap.put(entryKey, entry);
+        }
+
+        // Update the existing collection in place
+        List<Entry> existingEntries = schedule.getEntries();
+        existingEntries.clear();
+        existingEntries.addAll(entryMap.values());
+
+        // Save the updated schedule
         scheduleRepository.save(schedule);
+
         return "redirect:/viewSchedules";
     }
+
+
 
     @PostMapping("/deleteSchedule/{id}")
     public String deleteSchedule(@PathVariable Long id) {
         scheduleRepository.deleteById(id);
         return "redirect:/viewSchedules";
-    }
-    @GetMapping("/debugSchedule/{id}")
-    @ResponseBody
-    public String debugSchedule(@PathVariable Long id) {
-        Schedule schedule = scheduleRepository.findById(id).orElse(null);
-        if (schedule == null) {
-            return "Schedule with ID " + id + " not found.";
-        }
-
-        StringBuilder debugInfo = new StringBuilder();
-        debugInfo.append("Schedule Name: ").append(schedule.getName()).append("<br>");
-        debugInfo.append("Entries:<br>");
-        for (Map.Entry<String, String> entry : schedule.getEntries().entrySet()) {
-            debugInfo.append(entry.getKey()).append(" -> ").append(entry.getValue()).append("<br>");
-        }
-        return debugInfo.toString();
     }
 
 

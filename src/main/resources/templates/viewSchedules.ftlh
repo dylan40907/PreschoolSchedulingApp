@@ -22,5 +22,7 @@
     </tbody>
 </table>
 <a href="/newSchedule">Create a New Schedule</a>
+<br>
+<a href="/generateSchedule">Generate a Schedule</a>
 </body>
 </html>

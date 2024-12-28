@@ -26,7 +26,16 @@
                 <td>${timeSlot}</td>
                 <#list rooms as room>
                     <td>
-                        <input type="text" name="entries[${room.id}_${timeSlot}]" placeholder="Enter class/event">
+                        <label>
+                            Event:
+                            <input type="text" name="entries[${room.id}_${timeSlot}].eventName" placeholder="Enter class/event">
+                        </label>
+                        <br>
+                        <label>
+                            Teachers Required:
+                            <input type="number" name="entries[${room.id}_${timeSlot}].teachersRequired" placeholder="Number of teachers" min="0">
+                        </label>
+                        <br>
                     </td>
                 </#list>
             </tr>
