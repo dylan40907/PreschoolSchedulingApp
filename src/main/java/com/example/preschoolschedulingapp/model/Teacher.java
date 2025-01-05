@@ -3,6 +3,7 @@ package com.example.preschoolschedulingapp.model;
 import jakarta.persistence.*;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Set;
 
 @Entity
 public class Teacher {
@@ -15,21 +16,27 @@ public class Teacher {
 
     private String role; // Lead teacher, TA, etc.
 
-    private boolean lunchBreakWaiver;
-
     private LocalTime startTime;
 
     private LocalTime endTime;
 
+    @ManyToMany // Define a many-to-many relationship with Room
+    @JoinTable(
+            name = "teacher_preferred_rooms", // Join table name
+            joinColumns = @JoinColumn(name = "teacher_id"), // Foreign key for Teacher
+            inverseJoinColumns = @JoinColumn(name = "room_id") // Foreign key for Room
+    )
+    private Set<Room> preferredRooms; // Set of preferred Room objects
+
     public Teacher() {
     }
 
-    public Teacher(String name, String role, boolean lunchBreakWaiver, LocalTime startTime, LocalTime endTime) {
+    public Teacher(String name, String role, LocalTime startTime, LocalTime endTime, Set<Room> preferredRooms) {
         this.name = name;
         this.role = role;
-        this.lunchBreakWaiver = lunchBreakWaiver;
         this.startTime = startTime;
         this.endTime = endTime;
+        this.preferredRooms = preferredRooms;
     }
 
     // Getters and Setters
@@ -57,14 +64,6 @@ public class Teacher {
         this.role = role;
     }
 
-    public boolean isLunchBreakWaiver() {
-        return lunchBreakWaiver;
-    }
-
-    public void setLunchBreakWaiver(boolean lunchBreakWaiver) {
-        this.lunchBreakWaiver = lunchBreakWaiver;
-    }
-
     public LocalTime getStartTime() {
         return startTime;
     }
@@ -79,6 +78,14 @@ public class Teacher {
 
     public void setEndTime(LocalTime endTime) {
         this.endTime = endTime;
+    }
+
+    public Set<Room> getPreferredRooms() {
+        return preferredRooms;
+    }
+
+    public void setPreferredRooms(Set<Room> preferredRooms) {
+        this.preferredRooms = preferredRooms;
     }
 
     public void setAvailability(String availability) {

@@ -22,14 +22,21 @@
             <td>${timeSlot}</td>
             <#list rooms as room>
                 <td>
-                    <#list scheduleWithAssignments[room.id + "_" + timeSlot]![] as teacher>
-                        ${teacher.name}<br>
+                    <!-- Iterate over the entries for this room and time slot -->
+                    <#list scheduleWithAssignments[room.id + "_" + timeSlot]![] as entry>
+                        <!-- Display the class/event name -->
+                        <strong>${entry.eventName}</strong><br>
+                        <!-- For each entry, iterate over the assigned teachers -->
+                        <#list entry.assignedTeachers![] as teacher>
+                            ${teacher.name}<br>
+                        </#list>
+                        <br> <!-- Add some spacing between events -->
                     </#list>
                 </td>
             </#list>
             <td>
-                <#list breaks![] as teacherOnBreak>
-                    ${teacherOnBreak.name}<br>
+                <#list breaks[timeSlot]!{} as teacherName, breakDuration>
+
                 </#list>
             </td>
         </tr>

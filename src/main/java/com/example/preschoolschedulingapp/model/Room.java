@@ -1,6 +1,7 @@
 package com.example.preschoolschedulingapp.model;
-import com.example.preschoolschedulingapp.model.Schedule;
+
 import jakarta.persistence.*;
+import java.util.Set;
 
 @Entity
 public class Room {
@@ -10,13 +11,21 @@ public class Room {
     private Long id;
 
     private String name;
+
     private int capacity;
 
-    @ManyToOne
-    @JoinColumn(name = "schedule_id")
-    private Schedule schedule; // This must match 'mappedBy' in Schedule
+    @ManyToMany(mappedBy = "preferredRooms") // Link back to Teacher
+    private Set<Teacher> teachersWithPreference; // Teachers who prefer this room
 
-    // Getters and setters
+    public Room() {
+    }
+
+    public Room(String name, int capacity) {
+        this.name = name;
+        this.capacity = capacity;
+    }
+
+    // Getters and Setters
     public Long getId() {
         return id;
     }
@@ -41,11 +50,11 @@ public class Room {
         this.capacity = capacity;
     }
 
-    public Schedule getSchedule() {
-        return schedule;
+    public Set<Teacher> getTeachersWithPreference() {
+        return teachersWithPreference;
     }
 
-    public void setSchedule(Schedule schedule) {
-        this.schedule = schedule;
+    public void setTeachersWithPreference(Set<Teacher> teachersWithPreference) {
+        this.teachersWithPreference = teachersWithPreference;
     }
 }

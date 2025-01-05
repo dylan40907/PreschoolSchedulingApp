@@ -11,10 +11,7 @@ import org.springframework.web.bind.annotation.*;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 @Controller
 public class HomeController {
@@ -56,32 +53,50 @@ public class HomeController {
     @GetMapping("/addTeacher")
     public String addTeacher(Model model) {
         model.addAttribute("teacher", new Teacher());
+        model.addAttribute("rooms", roomRepository.findAll());
         return "/addTeacher";
     }
 
     @PostMapping("/addTeacher")
-    public String addTeacher(@ModelAttribute Teacher teacher, @RequestParam String availability) {
+    public String addTeacher(
+            @ModelAttribute Teacher teacher,
+            @RequestParam String availability,
+            @RequestParam List<Long> preferredRooms // Capture selected room IDs
+    ) {
         teacher.setAvailability(availability); // Parse the availability string
+        List<Room> rooms = (List<Room>) roomRepository.findAllById(preferredRooms); // Fetch Room entities
+        teacher.setPreferredRooms(new HashSet<>(rooms)); // Set preferred rooms
         teacherRepository.save(teacher);
         return "redirect:/teacherView";
     }
+
 
     @GetMapping("/editTeacher/{id}")
     public String editTeacher(@PathVariable Long id, Model model) {
         Teacher teacher = teacherRepository.findById(id).orElse(null);
+        List<Room> rooms = (List<Room>) roomRepository.findAll(); // Fetch all rooms
         model.addAttribute("teacher", teacher);
+        model.addAttribute("rooms", rooms); // Pass rooms to the model
         return "editTeacher";
     }
 
+
     @PostMapping("/editTeacher/{id}")
-    public String updateTeacher(@PathVariable Long id, @RequestParam String availability) {
+    public String updateTeacher(
+            @PathVariable Long id,
+            @RequestParam String availability,
+            @RequestParam List<Long> preferredRooms // Capture selected room IDs
+    ) {
         Teacher teacher = teacherRepository.findById(id).orElse(null);
         String[] times = availability.split("-");
         teacher.setStartTime(LocalTime.parse(times[0].trim()));
         teacher.setEndTime(LocalTime.parse(times[1].trim()));
+        List<Room> rooms = (List<Room>) roomRepository.findAllById(preferredRooms); // Fetch Room entities
+        teacher.setPreferredRooms(new HashSet<>(rooms)); // Update preferred rooms
         teacherRepository.save(teacher);
         return "redirect:/teacherView";
     }
+
 
     @PostMapping("/deleteTeacher/{id}")
     public String deleteTeacher(@PathVariable Long id) {
@@ -299,51 +314,157 @@ public class HomeController {
         Schedule schedule = scheduleRepository.findById(scheduleId)
                 .orElseThrow(() -> new IllegalArgumentException("Schedule not found with id: " + scheduleId));
         List<Room> rooms = (List<Room>) roomRepository.findAll();
-        List<Teacher> teachers = (List<Teacher>) teacherRepository.findAll();
+        List<Teacher> allTeachers = (List<Teacher>) teacherRepository.findAll();
 
-        Map<String, List<Teacher>> roomAssignments = new HashMap<>();
-        List<Teacher> teachersOnBreak = calculateBreaks(teachers);
+        // Map to store room assignments (key: time slot, value: list of entries)
+        Map<String, List<Entry>> roomAssignments = new HashMap<>();
 
-        for (Entry entry : schedule.getEntries()) {
-            List<Teacher> availableTeachers = findAvailableTeachers(teachers, entry.getTimeSlot());
-            List<Teacher> assignedTeachers = assignTeachers(availableTeachers, entry.getTeachersRequired(), entry.getTimeSlot());
-            roomAssignments.put(entry.getRoomId() + "_" + entry.getTimeSlot(), assignedTeachers);
+        // Map to track breaks for each time slot
+        Map<String, Map<String, Integer>> breaksByTimeSlot = new HashMap<>();
+
+        // Get all time slots for the schedule
+        List<String> timeSlots = generateTimeSlots();
+
+        // Debugging: Print available time slots
+        System.out.println("Time Slots:");
+        timeSlots.forEach(System.out::println);
+
+        // Populate room assignments and calculate breaks
+        for (String timeSlot : timeSlots) {
+            System.out.println("Processing time slot: " + timeSlot);
+
+            // Global pool of available teachers for the time slot
+            List<Teacher> availableTeachersForSlot = findAvailableTeachers(allTeachers, timeSlot);
+
+            for (Room room : rooms) {
+                // Find entries for the current room and time slot
+                for (Entry entry : schedule.getEntries()) {
+                    if (entry.getTimeSlot().equals(timeSlot) && entry.getRoomId().equals(room.getId().toString())) {
+                        // Add the entry to the corresponding room and time slot key
+                        String key = room.getId() + "_" + timeSlot;
+                        roomAssignments.computeIfAbsent(key, k -> new ArrayList<>()).add(entry);
+
+                        // Assign teachers to the entry
+                        List<Teacher> assignedTeachers = assignTeachers(availableTeachersForSlot, entry.getTeachersRequired(), timeSlot);
+
+                        // Update the entry with assigned teachers
+                        entry.setAssignedTeachers(assignedTeachers);
+
+                        // Remove assigned teachers from the global pool
+                        availableTeachersForSlot.removeAll(assignedTeachers);
+
+                        // Debugging: Print assigned teachers for each entry
+                        System.out.println("Assigned teachers for room: " + room.getName() + ", time slot: " + timeSlot);
+                        assignedTeachers.forEach(teacher -> System.out.println(" - " + teacher.getName()));
+                    }
+                }
+            }
+
+            // Calculate breaks for the current time slot
+            Map<String, Integer> breaks = calculateBreaksForTimeSlot(allTeachers, roomAssignments, timeSlot);
+            breaksByTimeSlot.put(timeSlot, breaks);
+
+            // Debugging: Print breaks for the current time slot
+            System.out.println("Breaks for time slot: " + timeSlot);
+            breaks.forEach((teacherName, breakDuration) ->
+                    System.out.println(teacherName + " -> " + breakDuration + " minutes"));
         }
 
-        model.addAttribute("schedule", schedule); // Pass the full schedule object
+        // Add attributes to the model
+        model.addAttribute("schedule", schedule);
         model.addAttribute("rooms", rooms);
         model.addAttribute("scheduleWithAssignments", roomAssignments);
-        model.addAttribute("breaks", teachersOnBreak);
-        model.addAttribute("timeSlots", generateTimeSlots());
+        model.addAttribute("breaks", breaksByTimeSlot);
+        model.addAttribute("timeSlots", timeSlots);
 
         return "generateSchedule";
     }
 
 
-    private List<Teacher> calculateBreaks(List<Teacher> teachers) {
-        List<Teacher> teachersOnBreak = new ArrayList<>();
-        LocalTime now = LocalTime.now();
+    private Map<String, Integer> calculateBreaksForTimeSlot(
+            List<Teacher> teachers,
+            Map<String, List<Entry>> roomAssignments,
+            String timeSlot
+    ) {
+        Map<String, Integer> breakAssignments = new HashMap<>();
+
+        System.out.println("Calculating breaks for time slot: " + timeSlot);
 
         for (Teacher teacher : teachers) {
-            if (requiresBreak(teacher, now)) {
-                teachersOnBreak.add(teacher);
+            // Calculate total minutes worked up to the given time slot
+            long totalMinutesWorked = calculateMinutesWorked(teacher, roomAssignments, timeSlot);
+
+            // Debugging: Print total minutes worked for the teacher
+            System.out.println("Teacher: " + teacher.getName() + ", Total Minutes Worked: " + totalMinutesWorked);
+
+            // Determine the required break duration
+            int breakDuration = determineBreakDuration(totalMinutesWorked);
+
+            if (breakDuration > 0) {
+                breakAssignments.put(teacher.getName(), breakDuration);
+
+                // Debugging: Print assigned break duration
+                System.out.println("Assigned Break: " + teacher.getName() + " -> " + breakDuration + " minutes");
             }
         }
-        return teachersOnBreak;
+
+        return breakAssignments;
     }
 
-    private boolean requiresBreak(Teacher teacher, LocalTime currentTime) {
-        long minutesSinceStart = teacher.getStartTime().until(currentTime, ChronoUnit.MINUTES);
 
-        if (minutesSinceStart >= 300 && minutesSinceStart % 300 < 10) {
-            return true; // Teacher needs a 30-minute break after 5 hours
+
+
+    // Calculate the total minutes worked by a teacher up to the given timeSlot
+    private long calculateMinutesWorked(Teacher teacher, Map<String, List<Entry>> roomAssignments, String timeSlot) {
+        long totalMinutes = 0;
+
+        // Parse the current time slot into a LocalTime range
+        String[] targetTimes = timeSlot.split(" - ");
+        LocalTime targetStart = LocalTime.parse(targetTimes[0], DateTimeFormatter.ofPattern("hh:mm a"));
+
+        for (Map.Entry<String, List<Entry>> entrySet : roomAssignments.entrySet()) {
+            // Extract the time slot portion from the key
+            String[] keyParts = entrySet.getKey().split("_");
+            String currentSlot = keyParts.length > 1 ? keyParts[1] : "";
+
+            // Parse the current slot into a LocalTime range
+            String[] currentTimes = currentSlot.split(" - ");
+            LocalTime currentEnd = LocalTime.parse(currentTimes[1], DateTimeFormatter.ofPattern("hh:mm a"));
+
+            // Only consider time slots up to and including the given time slot
+            if (currentEnd.isAfter(targetStart)) {
+                continue;
+            }
+
+            for (Entry entry : entrySet.getValue()) {
+                // Check if the teacher is assigned to this entry
+                if (entry.getAssignedTeachers() != null && entry.getAssignedTeachers().contains(teacher)) {
+                    // Parse the time slot string to calculate the duration
+                    LocalTime start = LocalTime.parse(currentTimes[0], DateTimeFormatter.ofPattern("hh:mm a"));
+                    LocalTime end = LocalTime.parse(currentTimes[1], DateTimeFormatter.ofPattern("hh:mm a"));
+
+                    totalMinutes += ChronoUnit.MINUTES.between(start, end);
+                }
+            }
         }
 
-        if (minutesSinceStart >= 210 && minutesSinceStart % 210 < 10) {
-            return true; // Teacher needs a 10-minute break after 3.5 hours
-        }
+        return totalMinutes;
+    }
 
-        return false;
+
+
+    // Determine break duration based on total minutes worked
+    private int determineBreakDuration(long totalMinutesWorked) {
+        if (totalMinutesWorked >= 375) {
+            return 30; // More than 6.25 hours -> requires another 30-minute break
+        } else if (totalMinutesWorked >= 360) {
+            return 10; // At 6 hours, add a 10-minute break
+        } else if (totalMinutesWorked >= 300) {
+            return 30; // After 5 hours, add a 30-minute break
+        } else if (totalMinutesWorked >= 210) {
+            return 10; // At 3.5 hours, add a 10-minute break
+        }
+        return 0; // No break needed
     }
 
     private List<Teacher> assignTeachers(List<Teacher> availableTeachers, int requiredTeachers, String timeSlot) {
@@ -377,11 +498,11 @@ public class HomeController {
     private List<String> generateTimeSlots() {
         List<String> timeSlots = new ArrayList<>();
         LocalTime startTime = LocalTime.of(7, 30); // Start at 7:30 AM
-        LocalTime endTime = LocalTime.of(17, 50);   // End at 6:00 PM
+        LocalTime endTime = LocalTime.of(17, 55);   // End at 6:00 PM
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("hh:mm a");
 
         while (!startTime.isAfter(endTime)) {
-            LocalTime nextTime = startTime.plusMinutes(10); // Add 10 minutes
+            LocalTime nextTime = startTime.plusMinutes(5); // Add 10 minutes
             timeSlots.add(startTime.format(formatter) + " - " + nextTime.format(formatter));
             startTime = nextTime; // Move to the next time slot
         }

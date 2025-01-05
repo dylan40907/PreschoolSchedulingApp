@@ -1,12 +1,4 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Add Teacher</title>
-</head>
-<body>
 <#include "navbar.ftlh">
-<h1>Add Teacher</h1>
 <form method="post">
     <label for="name">Name:</label>
     <input type="text" id="name" name="name" required>
@@ -20,7 +12,12 @@
     <label for="availability">Availability:</label>
     <input type="text" id="availability" name="availability">
     <br><br>
+    <label>Preferred Rooms:</label>
+    <br>
+    <#list rooms as room>
+        <input type="checkbox" id="room-${room.id}" name="preferredRooms" value="${room.id}">
+        <label for="room-${room.id}">${room.name} (Capacity: ${room.capacity})</label><br>
+    </#list>
+    <br>
     <button type="submit">Add Teacher</button>
 </form>
-</body>
-</html>

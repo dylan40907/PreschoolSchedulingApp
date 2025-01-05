@@ -17,10 +17,6 @@ public class Schedule {
 
     @OneToMany(mappedBy = "schedule", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<Entry> entries;
-
-    @OneToMany(mappedBy = "schedule", cascade = CascadeType.ALL, orphanRemoval = true)
-    private List<Room> rooms;
-
     public Schedule() {}
 
     public Schedule(String name, List<Entry> entries) {
