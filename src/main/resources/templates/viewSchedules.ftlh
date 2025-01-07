@@ -21,7 +21,7 @@
             </td>
             <td>
                 <!-- Edit and Generate Schedule Buttons -->
-                <form action="/generateSchedule/${schedule.id}" method="get" style="display: inline;">
+                <form action="/preGeneration/${schedule.id}" method="get" style="display: inline;">
                     <button type="submit">Generate Schedule</button>
                 </form>
                 <form action="/deleteSchedule/${schedule.id}" method="post" onsubmit="return confirm('Are you sure you want to delete this schedule?');" style="display: inline;">
