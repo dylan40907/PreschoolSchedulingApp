@@ -13,10 +13,6 @@
     <input type="text" id="name" name="name" value="${room.name}" readonly>
     <br>
 
-    <label for="capacity">Capacity:</label>
-    <input type="number" id="capacity" name="capacity" value="${room.capacity}">
-    <br>
-
     <button type="submit">Save</button>
 </form>
 

@@ -12,6 +12,7 @@ import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Controller
 public class HomeController {
@@ -59,16 +60,57 @@ public class HomeController {
 
     @PostMapping("/addTeacher")
     public String addTeacher(
-            @ModelAttribute Teacher teacher,
+            @RequestParam String name, // Capture the name of the teacher
+            @RequestParam String role, // Capture the role of the teacher
             @RequestParam String availability,
-            @RequestParam List<Long> preferredRooms // Capture selected room IDs
+            @RequestParam List<Long> preferredRooms,
+            @RequestParam(required = false) String noBreakPeriods, // Optional parameter
+            @RequestParam(required = false) String requiredTime,
+            @RequestParam(required = false) Long requiredRoom,
+            @RequestParam(required = false, defaultValue = "0") int numTenMinBreaks, // Default to 0
+            @RequestParam(required = false, defaultValue = "0") int longBreakLength // Default to 0
     ) {
-        teacher.setAvailability(availability); // Parse the availability string
-        List<Room> rooms = (List<Room>) roomRepository.findAllById(preferredRooms); // Fetch Room entities
-        teacher.setPreferredRooms(new HashSet<>(rooms)); // Set preferred rooms
+        Teacher teacher = new Teacher();
+
+        // Set name and role
+        teacher.setName(name);
+        teacher.setRole(role);
+
+        // Parse availability
+        teacher.setAvailability(availability);
+
+        // Parse preferred rooms
+        List<Room> rooms = (List<Room>) roomRepository.findAllById(preferredRooms);
+        teacher.setPreferredRooms(new HashSet<>(rooms));
+
+        // Parse noBreakPeriods if provided
+        if (noBreakPeriods != null && !noBreakPeriods.isEmpty()) {
+            teacher.setNoBreakPeriods(parseNoBreakPeriods(noBreakPeriods));
+        } else {
+            teacher.setNoBreakPeriods(new HashMap<>()); // Default to empty map
+        }
+
+        // Parse required time if provided
+        if (requiredTime != null && !requiredTime.isEmpty()) {
+            String[] times = requiredTime.split("-");
+            teacher.setRequiredTimeStart(LocalTime.parse(times[0].trim(), DateTimeFormatter.ofPattern("hh:mm a")));
+            teacher.setRequiredTimeEnd(LocalTime.parse(times[1].trim(), DateTimeFormatter.ofPattern("hh:mm a")));
+        }
+
+        // Set required room if provided
+        if (requiredRoom != null) {
+            Room room = roomRepository.findById(requiredRoom).orElse(null);
+            teacher.setRequiredRoom(room);
+        }
+
+        // Set numTenMinBreaks and longBreakLength
+        teacher.setNumTenMinBreaks(numTenMinBreaks);
+        teacher.setLongBreakLength(longBreakLength);
+
         teacherRepository.save(teacher);
         return "redirect:/teacherView";
     }
+
 
 
     @GetMapping("/editTeacher/{id}")
@@ -77,6 +119,38 @@ public class HomeController {
         List<Room> rooms = (List<Room>) roomRepository.findAll(); // Fetch all rooms
         model.addAttribute("teacher", teacher);
         model.addAttribute("rooms", rooms); // Pass rooms to the model
+
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("hh:mm a");
+
+        System.out.println("Teacher: " + teacher.getNoBreakPeriods());
+
+        // Format availability
+        String availability = "";
+        if (teacher.getStartTime() != null && teacher.getEndTime() != null) {
+            availability = teacher.getStartTime().format(formatter) + " - " + teacher.getEndTime().format(formatter);
+        }
+        model.addAttribute("availability", availability);
+
+        // Format required time
+        String requiredTime = "";
+        if (teacher.getRequiredTimeStart() != null && teacher.getRequiredTimeEnd() != null) {
+            requiredTime = teacher.getRequiredTimeStart().format(formatter) + " - " + teacher.getRequiredTimeEnd().format(formatter);
+        }
+        model.addAttribute("requiredTime", requiredTime);
+
+        // Convert noBreakPeriods to String
+        Map<String, String> noBreakPeriodsAsString = new HashMap<>();
+        if (teacher.getNoBreakPeriods() != null) {
+            noBreakPeriodsAsString = teacher.getNoBreakPeriods()
+                    .entrySet()
+                    .stream()
+                    .collect(Collectors.toMap(
+                            e -> e.getKey().format(formatter),
+                            e -> e.getValue().format(formatter)
+                    ));
+        }
+        model.addAttribute("noBreakPeriodsAsString", noBreakPeriodsAsString);
+
         return "editTeacher";
     }
 
@@ -84,19 +158,91 @@ public class HomeController {
     @PostMapping("/editTeacher/{id}")
     public String updateTeacher(
             @PathVariable Long id,
+            @RequestParam String name, // Capture the updated name of the teacher
+            @RequestParam String role, // Capture the updated role of the teacher
             @RequestParam String availability,
-            @RequestParam List<Long> preferredRooms // Capture selected room IDs
+            @RequestParam List<Long> preferredRooms,
+            @RequestParam(required = false) String noBreakPeriods,
+            @RequestParam(required = false) String requiredTime,
+            @RequestParam(required = false) Long requiredRoom,
+            @RequestParam(required = false, defaultValue = "0") int numTenMinBreaks, // Default to 0
+            @RequestParam(required = false, defaultValue = "0") int longBreakLength // Default to 0
     ) {
         Teacher teacher = teacherRepository.findById(id).orElse(null);
+
+        // Update name and role
+        teacher.setName(name);
+        teacher.setRole(role);
+
+        // Update availability
         String[] times = availability.split("-");
-        teacher.setStartTime(LocalTime.parse(times[0].trim()));
-        teacher.setEndTime(LocalTime.parse(times[1].trim()));
-        List<Room> rooms = (List<Room>) roomRepository.findAllById(preferredRooms); // Fetch Room entities
-        teacher.setPreferredRooms(new HashSet<>(rooms)); // Update preferred rooms
+        teacher.setStartTime(LocalTime.parse(times[0].trim(), DateTimeFormatter.ofPattern("hh:mm a")));
+        teacher.setEndTime(LocalTime.parse(times[1].trim(), DateTimeFormatter.ofPattern("hh:mm a")));
+
+        // Update preferred rooms
+        List<Room> rooms = (List<Room>) roomRepository.findAllById(preferredRooms);
+        teacher.setPreferredRooms(new HashSet<>(rooms));
+
+        // Parse noBreakPeriods
+        if (noBreakPeriods != null && !noBreakPeriods.isEmpty()) {
+            Map<LocalTime, LocalTime> noBreakMap = parseNoBreakPeriods(noBreakPeriods);
+            teacher.setNoBreakPeriods(noBreakMap);
+        }
+
+        // Parse required time
+        if (requiredTime != null && !requiredTime.isEmpty()) {
+            String[] reqTimes = requiredTime.split("-");
+            teacher.setRequiredTimeStart(LocalTime.parse(reqTimes[0].trim(), DateTimeFormatter.ofPattern("hh:mm a")));
+            teacher.setRequiredTimeEnd(LocalTime.parse(reqTimes[1].trim(), DateTimeFormatter.ofPattern("hh:mm a")));
+        }
+
+        // Update required room
+        if (requiredRoom != null) {
+            Room room = roomRepository.findById(requiredRoom).orElse(null);
+            teacher.setRequiredRoom(room);
+        }
+
+        // Update numTenMinBreaks and longBreakLength
+        teacher.setNumTenMinBreaks(numTenMinBreaks);
+        teacher.setLongBreakLength(longBreakLength);
+
         teacherRepository.save(teacher);
         return "redirect:/teacherView";
     }
 
+
+    private Map<LocalTime, LocalTime> parseNoBreakPeriods(String noBreakPeriods) {
+        Map<LocalTime, LocalTime> noBreakMap = new HashMap<>();
+        if (noBreakPeriods != null && !noBreakPeriods.trim().isEmpty()) {
+            
+            String[] periods = noBreakPeriods.split(",");
+            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("hh:mm a");
+            for (String period : periods) {
+                try {
+                    String[] times = period.trim().split("-");
+                    if (times.length != 2) {
+                        System.err.println("Invalid period format: " + period.trim());
+                        continue;
+                    }
+                    LocalTime start = LocalTime.parse(times[0].trim(), formatter);
+                    LocalTime end = LocalTime.parse(times[1].trim(), formatter);
+
+                    if (start.isAfter(end)) {
+                        System.err.println("Invalid period: Start time is after end time. Period: " + period.trim());
+                        continue;
+                    }
+
+                    noBreakMap.put(start, end);
+                    System.out.println("Parsed period: " + start + " - " + end);
+                } catch (Exception e) {
+                    System.err.println("Error parsing period: " + period.trim() + ". Exception: " + e.getMessage());
+                }
+            }
+        } else {
+            System.out.println("No noBreakPeriods provided or input is empty.");
+        }
+        return noBreakMap;
+    }
 
     @PostMapping("/deleteTeacher/{id}")
     public String deleteTeacher(@PathVariable Long id) {
@@ -132,10 +278,9 @@ public class HomeController {
     }
 
     @PostMapping("/editRoom/{id}")
-    public String updateRoom(@PathVariable Long id, @RequestParam String name, @RequestParam int capacity) {
+    public String updateRoom(@PathVariable Long id, @RequestParam String name) {
         Room room = roomRepository.findById(id).orElse(null);
         room.setName(name); // Room name remains constant
-        room.setCapacity(capacity);
         roomRepository.save(room);
         return "redirect:/roomView";
     }
@@ -359,112 +504,15 @@ public class HomeController {
                     }
                 }
             }
-
-            // Calculate breaks for the current time slot
-            Map<String, Integer> breaks = calculateBreaksForTimeSlot(allTeachers, roomAssignments, timeSlot);
-            breaksByTimeSlot.put(timeSlot, breaks);
-
-            // Debugging: Print breaks for the current time slot
-            System.out.println("Breaks for time slot: " + timeSlot);
-            breaks.forEach((teacherName, breakDuration) ->
-                    System.out.println(teacherName + " -> " + breakDuration + " minutes"));
         }
 
         // Add attributes to the model
         model.addAttribute("schedule", schedule);
         model.addAttribute("rooms", rooms);
         model.addAttribute("scheduleWithAssignments", roomAssignments);
-        model.addAttribute("breaks", breaksByTimeSlot);
         model.addAttribute("timeSlots", timeSlots);
 
         return "generateSchedule";
-    }
-
-
-    private Map<String, Integer> calculateBreaksForTimeSlot(
-            List<Teacher> teachers,
-            Map<String, List<Entry>> roomAssignments,
-            String timeSlot
-    ) {
-        Map<String, Integer> breakAssignments = new HashMap<>();
-
-        System.out.println("Calculating breaks for time slot: " + timeSlot);
-
-        for (Teacher teacher : teachers) {
-            // Calculate total minutes worked up to the given time slot
-            long totalMinutesWorked = calculateMinutesWorked(teacher, roomAssignments, timeSlot);
-
-            // Debugging: Print total minutes worked for the teacher
-            System.out.println("Teacher: " + teacher.getName() + ", Total Minutes Worked: " + totalMinutesWorked);
-
-            // Determine the required break duration
-            int breakDuration = determineBreakDuration(totalMinutesWorked);
-
-            if (breakDuration > 0) {
-                breakAssignments.put(teacher.getName(), breakDuration);
-
-                // Debugging: Print assigned break duration
-                System.out.println("Assigned Break: " + teacher.getName() + " -> " + breakDuration + " minutes");
-            }
-        }
-
-        return breakAssignments;
-    }
-
-
-
-
-    // Calculate the total minutes worked by a teacher up to the given timeSlot
-    private long calculateMinutesWorked(Teacher teacher, Map<String, List<Entry>> roomAssignments, String timeSlot) {
-        long totalMinutes = 0;
-
-        // Parse the current time slot into a LocalTime range
-        String[] targetTimes = timeSlot.split(" - ");
-        LocalTime targetStart = LocalTime.parse(targetTimes[0], DateTimeFormatter.ofPattern("hh:mm a"));
-
-        for (Map.Entry<String, List<Entry>> entrySet : roomAssignments.entrySet()) {
-            // Extract the time slot portion from the key
-            String[] keyParts = entrySet.getKey().split("_");
-            String currentSlot = keyParts.length > 1 ? keyParts[1] : "";
-
-            // Parse the current slot into a LocalTime range
-            String[] currentTimes = currentSlot.split(" - ");
-            LocalTime currentEnd = LocalTime.parse(currentTimes[1], DateTimeFormatter.ofPattern("hh:mm a"));
-
-            // Only consider time slots up to and including the given time slot
-            if (currentEnd.isAfter(targetStart)) {
-                continue;
-            }
-
-            for (Entry entry : entrySet.getValue()) {
-                // Check if the teacher is assigned to this entry
-                if (entry.getAssignedTeachers() != null && entry.getAssignedTeachers().contains(teacher)) {
-                    // Parse the time slot string to calculate the duration
-                    LocalTime start = LocalTime.parse(currentTimes[0], DateTimeFormatter.ofPattern("hh:mm a"));
-                    LocalTime end = LocalTime.parse(currentTimes[1], DateTimeFormatter.ofPattern("hh:mm a"));
-
-                    totalMinutes += ChronoUnit.MINUTES.between(start, end);
-                }
-            }
-        }
-
-        return totalMinutes;
-    }
-
-
-
-    // Determine break duration based on total minutes worked
-    private int determineBreakDuration(long totalMinutesWorked) {
-        if (totalMinutesWorked >= 375) {
-            return 30; // More than 6.25 hours -> requires another 30-minute break
-        } else if (totalMinutesWorked >= 360) {
-            return 10; // At 6 hours, add a 10-minute break
-        } else if (totalMinutesWorked >= 300) {
-            return 30; // After 5 hours, add a 30-minute break
-        } else if (totalMinutesWorked >= 210) {
-            return 10; // At 3.5 hours, add a 10-minute break
-        }
-        return 0; // No break needed
     }
 
     private List<Teacher> assignTeachers(List<Teacher> availableTeachers, int requiredTeachers, String timeSlot) {

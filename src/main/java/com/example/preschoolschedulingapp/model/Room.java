@@ -12,17 +12,14 @@ public class Room {
 
     private String name;
 
-    private int capacity;
-
     @ManyToMany(mappedBy = "preferredRooms") // Link back to Teacher
     private Set<Teacher> teachersWithPreference; // Teachers who prefer this room
 
     public Room() {
     }
 
-    public Room(String name, int capacity) {
+    public Room(String name) {
         this.name = name;
-        this.capacity = capacity;
     }
 
     // Getters and Setters
@@ -40,14 +37,6 @@ public class Room {
 
     public void setName(String name) {
         this.name = name;
-    }
-
-    public int getCapacity() {
-        return capacity;
-    }
-
-    public void setCapacity(int capacity) {
-        this.capacity = capacity;
     }
 
     public Set<Teacher> getTeachersWithPreference() {

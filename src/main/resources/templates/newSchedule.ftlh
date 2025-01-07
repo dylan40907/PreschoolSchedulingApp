@@ -16,7 +16,7 @@
         <tr>
             <th>Time Slot</th>
             <#list rooms as room>
-                <th>${room.name} (Capacity: ${room.capacity})</th>
+                <th>${room.name})</th>
             </#list>
         </tr>
         </thead>
