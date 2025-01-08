@@ -35,7 +35,7 @@
                 </td>
             </#list>
             <td>
-                
+
             </td>
         </tr>
     </#list>

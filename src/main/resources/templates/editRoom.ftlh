@@ -10,7 +10,7 @@
 
 <form action="/editRoom/${room.id}" method="post">
     <label for="name">Room Name:</label>
-    <input type="text" id="name" name="name" value="${room.name}" readonly>
+    <input type="text" id="name" name="name" value="${room.name}">
     <br>
 
     <button type="submit">Save</button>

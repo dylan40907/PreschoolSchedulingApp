@@ -11,9 +11,6 @@
     <label for="name">Room Name:</label>
     <input type="text" id="name" name="name" required>
     <br><br>
-    <label for="capacity">Capacity:</label>
-    <input type="number" id="capacity" name="capacity" value="2">
-    <br><br>
     <button type="submit">Add Room</button>
 </form>
 </body>

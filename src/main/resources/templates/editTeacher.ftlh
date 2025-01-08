@@ -10,7 +10,7 @@
     <input type="text" id="role" name="role" value="${teacher.role}">
     <br><br>
 
-    <label for="availability">Availability (e.g., 09:00 AM-05:00 PM):</label>
+    <label for="availability">Availability:</label>
     <input type="text" id="availability" name="availability" value="${availability}">
     <br><br>
 
@@ -28,16 +28,11 @@
     </#list>
     <br>
 
-    <label>No Break Periods (e.g., 09:30 AM-11:00 AM, 02:00 PM-03:00 PM):</label>
-    <input
-            type="text"
-            id="noBreakPeriods"
-            name="noBreakPeriods"
-            value="<#list noBreakPeriodsAsString?keys as startTime>${startTime}-${noBreakPeriodsAsString[startTime]}<#if startTime_has_next>, </#if></#list>"
-    >
+    <label for="noBreakPeriods">No Break Periods:</label>
+    <input type="text" id="noBreakPeriods" name="noBreakPeriods" value="<#list noBreakPeriodsAsString?keys as startTime>${startTime}-${noBreakPeriodsAsString[startTime]}<#if startTime_has_next>, </#if></#list>">
     <br><br>
 
-    <label for="requiredTime">Required Time (e.g., 08:00 AM-09:00 AM):</label>
+    <label for="requiredTime">Required Time:</label>
     <input type="text" id="requiredTime" name="requiredTime" value="${requiredTime}">
     <br><br>
 
@@ -55,8 +50,12 @@
     <input type="number" id="numTenMinBreaks" name="numTenMinBreaks" value="${teacher.numTenMinBreaks!0}" min="0">
     <br><br>
 
-    <label for="longBreakLength">Long Break Length (minutes):</label>
+    <label for="longBreakLength">Long Break Length:</label>
     <input type="number" id="longBreakLength" name="longBreakLength" value="${teacher.longBreakLength!0}" min="0">
+    <br><br>
+
+    <label for="hasPriority">Has Priority:</label>
+    <input type="checkbox" id="hasPriority" name="hasPriority" value="true" <#if teacher.hasPriority()>checked</#if>>
     <br><br>
 
     <button type="submit">Save</button>

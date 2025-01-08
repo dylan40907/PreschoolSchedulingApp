@@ -25,6 +25,8 @@ public class Teacher {
 
     private LocalTime requiredTimeEnd;
 
+    private boolean hasPriority;
+
     @ManyToOne // Define a many-to-one relationship with Room
     @JoinColumn(name = "required_room_id") // Foreign key for Room
     private Room requiredRoom;
@@ -49,7 +51,7 @@ public class Teacher {
     public Teacher() {
     }
 
-    public Teacher(String name, String role, LocalTime startTime, LocalTime endTime, LocalTime requiredTimeStart, LocalTime requiredTimeEnd, Room requiredRoom, Set<Room> preferredRooms, Map<LocalTime, LocalTime> noBreakPeriods, Integer numTenMinBreaks, Integer longBreakLength) {
+    public Teacher(String name, String role, LocalTime startTime, LocalTime endTime, LocalTime requiredTimeStart, LocalTime requiredTimeEnd, Room requiredRoom, Set<Room> preferredRooms, Map<LocalTime, LocalTime> noBreakPeriods, Integer numTenMinBreaks, Integer longBreakLength, boolean hasPriority) {
         this.name = name;
         this.role = role;
         this.startTime = startTime;
@@ -61,6 +63,7 @@ public class Teacher {
         this.noBreakPeriods = noBreakPeriods;
         this.numTenMinBreaks = numTenMinBreaks;
         this.longBreakLength = longBreakLength;
+        this.hasPriority = hasPriority;
     }
 
     // Getters and Setters
@@ -158,6 +161,14 @@ public class Teacher {
 
     public void setLongBreakLength(Integer longBreakLength) {
         this.longBreakLength = longBreakLength;
+    }
+
+    public boolean hasPriority() {
+        return hasPriority;
+    }
+
+    public void setPriority(boolean hasPriority) {
+        this.hasPriority = hasPriority;
     }
 
     public void setAvailability(String availability) {

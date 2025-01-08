@@ -25,8 +25,8 @@
     </#list>
     <br>
 
-    <label>No Break Periods (e.g., 09:30 AM-11:00 AM, 02:00 PM-03:00 PM):</label>
-    <input type="text" id="noBreakPeriods" name="noBreakPeriods" value="">
+    <label for="noBreakPeriods">No Break Periods (e.g., 09:30 AM-11:00 AM):</label>
+    <input type="text" id="noBreakPeriods" name="noBreakPeriods">
     <br><br>
 
     <label for="requiredTime">Required Time (e.g., 08:00 AM-09:00 AM):</label>
@@ -49,6 +49,10 @@
 
     <label for="longBreakLength">Long Break Length (minutes):</label>
     <input type="number" id="longBreakLength" name="longBreakLength" min="0">
+    <br><br>
+
+    <label for="hasPriority">Has Priority:</label>
+    <input type="checkbox" id="hasPriority" name="hasPriority">
     <br><br>
 
     <button type="submit">Add Teacher</button>
