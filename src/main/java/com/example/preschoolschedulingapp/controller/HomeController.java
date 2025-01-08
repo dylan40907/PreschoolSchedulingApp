@@ -536,7 +536,8 @@ public class HomeController {
                     if (existingEntry != null) {
                         // Retain previous teachers and event name
                         combinedTeachers.addAll(existingEntry.getAssignedTeachers());
-                        combinedEventName = existingEntry.getEventName() + ", Hard Restriction: " + restrictedTeacher.getName();
+                        combinedEventName = (existingEntry.getEventName() != null ? existingEntry.getEventName() + ", " : "")
+                                + "Hard Restriction: " + restrictedTeacher.getName();
                     } else {
                         combinedEventName = "Hard Restriction: " + restrictedTeacher.getName();
                     }
@@ -607,7 +608,6 @@ public class HomeController {
                     // Store the updated entry in the map
                     hardRestrictionEntries.put(key, requiredEntry);
                 }
-
             }
         }
 
@@ -644,11 +644,18 @@ public class HomeController {
                     // Handle regular schedule entries
                     for (Entry entry : schedule.getEntries()) {
                         if (entry.getTimeSlot().equals(timeSlot) && entry.getRoomId().equals(room.getId().toString())) {
-                            roomAssignments.computeIfAbsent(key, k -> new ArrayList<>()).add(entry);
+                            // Check preferredRooms for each teacher
+                            List<Teacher> validTeachers = availableTeachersForSlot.stream()
+                                    .filter(teacher -> teacher.getPreferredRooms().contains(room))
+                                    .collect(Collectors.toList());
 
-                            List<Teacher> assignedTeachers = assignTeachers(availableTeachersForSlot, entry.getTeachersRequired(), timeSlot);
-                            entry.setAssignedTeachers(assignedTeachers);
-                            availableTeachersForSlot.removeAll(assignedTeachers);
+                            if (!validTeachers.isEmpty()) {
+                                roomAssignments.computeIfAbsent(key, k -> new ArrayList<>()).add(entry);
+
+                                List<Teacher> assignedTeachers = assignTeachers(validTeachers, entry.getTeachersRequired(), timeSlot);
+                                entry.setAssignedTeachers(assignedTeachers);
+                                availableTeachersForSlot.removeAll(assignedTeachers);
+                            }
                         }
                     }
                 }
@@ -662,8 +669,6 @@ public class HomeController {
 
         return "generateSchedule";
     }
-
-
 
 
     private List<String> generateTimeSlotsInRange(LocalTime start, LocalTime end) {
