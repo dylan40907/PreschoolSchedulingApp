@@ -520,20 +520,31 @@ public class HomeController {
 
                     String key = restrictionRooms.get(i) + "_" + timeSlot;
 
-                    // Check for existing entry and combine
+                    // Check for an existing entry in the local map or the schedule
                     Entry existingEntry = hardRestrictionEntries.get(key);
+                    if (existingEntry == null) {
+                        int finalI1 = i;
+                        existingEntry = schedule.getEntries().stream()
+                                .filter(entry -> entry.getTimeSlot().equals(timeSlot) && entry.getRoomId().equals(restrictionRooms.get(finalI1).toString()))
+                                .findFirst()
+                                .orElse(null);
+                    }
+
                     List<Teacher> combinedTeachers = new ArrayList<>();
                     String combinedEventName;
 
                     if (existingEntry != null) {
+                        // Retain previous teachers and event name
                         combinedTeachers.addAll(existingEntry.getAssignedTeachers());
                         combinedEventName = existingEntry.getEventName() + ", Hard Restriction: " + restrictedTeacher.getName();
                     } else {
                         combinedEventName = "Hard Restriction: " + restrictedTeacher.getName();
                     }
 
+                    // Add the new teacher to the combined list
                     combinedTeachers.add(restrictedTeacher);
 
+                    // Create the updated restriction entry
                     Entry restrictionEntry = new Entry();
                     restrictionEntry.setTimeSlot(timeSlot);
                     restrictionEntry.setRoomId(restrictionRooms.get(i).toString());
@@ -541,6 +552,7 @@ public class HomeController {
                     restrictionEntry.setAssignedTeachers(combinedTeachers);
                     restrictionEntry.setEventName(combinedEventName);
 
+                    // Store the updated entry in the map
                     hardRestrictionEntries.put(key, restrictionEntry);
                 }
             }
@@ -560,20 +572,31 @@ public class HomeController {
 
                     String key = requiredRoom.getId() + "_" + timeSlot;
 
-                    // Check for existing entry and combine
+                    // Check for an existing entry in the local map or the schedule
                     Entry existingEntry = hardRestrictionEntries.get(key);
+                    if (existingEntry == null) {
+                        existingEntry = schedule.getEntries().stream()
+                                .filter(entry -> entry.getTimeSlot().equals(timeSlot) && entry.getRoomId().equals(requiredRoom.getId().toString()))
+                                .findFirst()
+                                .orElse(null);
+                    }
+
                     List<Teacher> combinedTeachers = new ArrayList<>();
                     String combinedEventName;
 
                     if (existingEntry != null) {
+                        // Retain previous teachers and event name
                         combinedTeachers.addAll(existingEntry.getAssignedTeachers());
-                        combinedEventName = existingEntry.getEventName() + ", Required Time: " + teacher.getName();
+                        combinedEventName = (existingEntry.getEventName() != null ? existingEntry.getEventName() + ", " : "")
+                                + "Required Time: " + teacher.getName();
                     } else {
                         combinedEventName = "Required Time: " + teacher.getName();
                     }
 
+                    // Add the new teacher to the combined list
                     combinedTeachers.add(teacher);
 
+                    // Create the updated required time entry
                     Entry requiredEntry = new Entry();
                     requiredEntry.setTimeSlot(timeSlot);
                     requiredEntry.setRoomId(requiredRoom.getId().toString());
@@ -581,8 +604,10 @@ public class HomeController {
                     requiredEntry.setAssignedTeachers(combinedTeachers);
                     requiredEntry.setEventName(combinedEventName);
 
+                    // Store the updated entry in the map
                     hardRestrictionEntries.put(key, requiredEntry);
                 }
+
             }
         }
 
