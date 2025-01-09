@@ -490,97 +490,62 @@ public class HomeController {
         List<Room> rooms = (List<Room>) roomRepository.findAll();
         List<Teacher> allTeachers = (List<Teacher>) teacherRepository.findAllById(selectedTeachers);
 
-        // Map for hard restriction entries
+        // Map to replace entries with hard restrictions
         Map<String, Entry> hardRestrictionEntries = new HashMap<>();
-
-        // Track teacher assignments per time slot to prevent duplicate assignments
         Map<String, Set<Long>> teacherAssignmentsPerSlot = new HashMap<>();
 
-        // Process hard restrictions
+        // Validate and process hard restrictions
         if (restrictionTeachers != null && timeSlots != null && restrictionRooms != null &&
                 restrictionTeachers.size() == timeSlots.size() && restrictionTeachers.size() == restrictionRooms.size()) {
+
             for (int i = 0; i < restrictionTeachers.size(); i++) {
                 if (timeSlots.get(i) == null || timeSlots.get(i).isEmpty()) continue;
 
                 String[] times = timeSlots.get(i).split("-");
                 if (times.length != 2) continue;
 
-                LocalTime start;
-                LocalTime end;
-                try {
-                    start = LocalTime.parse(times[0].trim(), DateTimeFormatter.ofPattern("hh:mm a"));
-                    end = LocalTime.parse(times[1].trim(), DateTimeFormatter.ofPattern("hh:mm a"));
-                } catch (Exception e) {
-                    continue;
-                }
+                LocalTime start = LocalTime.parse(times[0].trim(), DateTimeFormatter.ofPattern("hh:mm a"));
+                LocalTime end = LocalTime.parse(times[1].trim(), DateTimeFormatter.ofPattern("hh:mm a"));
 
-                int finalI1 = i;
+                int finalI = i;
                 Teacher restrictedTeacher = teacherRepository.findById(restrictionTeachers.get(i))
-                        .orElseThrow(() -> new IllegalArgumentException("Teacher not found with id: " + restrictionTeachers.get(finalI1)));
+                        .orElseThrow(() -> new IllegalArgumentException("Teacher not found with id: " + restrictionTeachers.get(finalI)));
 
                 for (LocalTime current = start; current.isBefore(end); current = current.plusMinutes(5)) {
                     LocalTime next = current.plusMinutes(5);
                     String timeSlot = current.format(DateTimeFormatter.ofPattern("hh:mm a")) + " - " + next.format(DateTimeFormatter.ofPattern("hh:mm a"));
                     String key = restrictionRooms.get(i) + "_" + timeSlot;
 
-                    int finalI = i;
+                    // Check for existing entry or create a new one
+                    int finalI1 = i;
                     Entry existingEntry = hardRestrictionEntries.getOrDefault(key, schedule.getEntries().stream()
-                            .filter(entry -> entry.getTimeSlot().equals(timeSlot) && entry.getRoomId().equals(restrictionRooms.get(finalI).toString()))
+                            .filter(entry -> entry.getTimeSlot().equals(timeSlot) && entry.getRoomId().equals(restrictionRooms.get(finalI1).toString()))
                             .findFirst()
                             .orElse(new Entry()));
 
-                    // Combine event name and teachers
+                    // Update entry
                     String originalEventName = existingEntry.getEventName() != null ? existingEntry.getEventName() + ", " : "";
                     existingEntry.setEventName(originalEventName + "Hard Restriction: " + restrictedTeacher.getName());
 
                     List<Teacher> assignedTeachers = new ArrayList<>(existingEntry.getAssignedTeachers() != null ? existingEntry.getAssignedTeachers() : new ArrayList<>());
                     if (!assignedTeachers.contains(restrictedTeacher)) assignedTeachers.add(restrictedTeacher);
 
-                    existingEntry.setTeachersRequired(existingEntry.getTeachersRequired() > 0 ? existingEntry.getTeachersRequired() : 2);
+                    existingEntry.setTeachersRequired(Math.max(existingEntry.getTeachersRequired(), assignedTeachers.size()));
                     existingEntry.setAssignedTeachers(assignedTeachers);
 
                     hardRestrictionEntries.put(key, existingEntry);
-
-                    // Track teacher assignment
                     teacherAssignmentsPerSlot.computeIfAbsent(timeSlot, k -> new HashSet<>()).add(restrictedTeacher.getId());
                 }
             }
         }
 
-        // Process required times for teachers
-        for (Teacher teacher : allTeachers) {
-            if (teacher.getRequiredTimeStart() != null && teacher.getRequiredTimeEnd() != null && teacher.getRequiredRoom() != null) {
-                LocalTime start = teacher.getRequiredTimeStart();
-                LocalTime end = teacher.getRequiredTimeEnd();
-                Room requiredRoom = teacher.getRequiredRoom();
+        // Process required times (prioritized first)
+        List<Teacher> prioritizedTeachers = allTeachers.stream().filter(Teacher::hasPriority).toList();
+        processRequiredTimes(prioritizedTeachers, hardRestrictionEntries, teacherAssignmentsPerSlot, schedule);
 
-                for (LocalTime current = start; current.isBefore(end); current = current.plusMinutes(5)) {
-                    LocalTime next = current.plusMinutes(5);
-                    String timeSlot = current.format(DateTimeFormatter.ofPattern("hh:mm a")) + " - " + next.format(DateTimeFormatter.ofPattern("hh:mm a"));
-                    String key = requiredRoom.getId() + "_" + timeSlot;
-
-                    Entry existingEntry = hardRestrictionEntries.getOrDefault(key, schedule.getEntries().stream()
-                            .filter(entry -> entry.getTimeSlot().equals(timeSlot) && entry.getRoomId().equals(requiredRoom.getId().toString()))
-                            .findFirst()
-                            .orElse(new Entry()));
-
-                    // Combine event name and teachers
-                    String originalEventName = existingEntry.getEventName() != null ? existingEntry.getEventName() + ", " : "";
-                    existingEntry.setEventName(originalEventName + "Required Time: " + teacher.getName());
-
-                    List<Teacher> assignedTeachers = new ArrayList<>(existingEntry.getAssignedTeachers() != null ? existingEntry.getAssignedTeachers() : new ArrayList<>());
-                    if (!assignedTeachers.contains(teacher)) assignedTeachers.add(teacher);
-
-                    existingEntry.setTeachersRequired(existingEntry.getTeachersRequired() > 0 ? existingEntry.getTeachersRequired() : 2);
-                    existingEntry.setAssignedTeachers(assignedTeachers);
-
-                    hardRestrictionEntries.put(key, existingEntry);
-
-                    // Track teacher assignment
-                    teacherAssignmentsPerSlot.computeIfAbsent(timeSlot, k -> new HashSet<>()).add(teacher.getId());
-                }
-            }
-        }
+        // Process remaining required times (non-prioritized)
+        List<Teacher> nonPrioritizedTeachers = allTeachers.stream().filter(t -> !t.hasPriority()).toList();
+        processRequiredTimes(nonPrioritizedTeachers, hardRestrictionEntries, teacherAssignmentsPerSlot, schedule);
 
         // Populate room assignments
         Map<String, List<Entry>> roomAssignments = new HashMap<>();
@@ -596,37 +561,31 @@ public class HomeController {
             for (Room room : rooms) {
                 String key = room.getId() + "_" + timeSlot;
 
-                if (hardRestrictionEntries.containsKey(key)) {
-                    Entry hardEntry = hardRestrictionEntries.get(key);
-                    int remainingTeachers = Math.max(0, hardEntry.getTeachersRequired() - hardEntry.getAssignedTeachers().size());
-                    List<Teacher> additionalTeachers = assignTeachers(availableTeachers, remainingTeachers, timeSlot);
+                // Combine logic for hardRestrictionEntries and schedule.getEntries()
+                Entry entry = hardRestrictionEntries.getOrDefault(key, schedule.getEntries().stream()
+                        .filter(e -> e.getTimeSlot().equals(timeSlot) && e.getRoomId().equals(room.getId().toString()))
+                        .findFirst()
+                        .orElse(null));
 
-                    hardEntry.getAssignedTeachers().addAll(additionalTeachers);
-                    roomAssignments.computeIfAbsent(key, k -> new ArrayList<>()).add(hardEntry);
+                if (entry != null) {
+                    // Fill remaining teachers if needed
+                    List<Teacher> additionalTeachers = assignTeachers(
+                            availableTeachers,
+                            entry.getTeachersRequired() - entry.getAssignedTeachers().size(),
+                            timeSlot
+                    );
+                    entry.getAssignedTeachers().addAll(additionalTeachers);
                     availableTeachers.removeAll(additionalTeachers);
+
+                    roomAssignments.computeIfAbsent(key, k -> new ArrayList<>()).add(entry);
 
                     // Track assigned teachers
                     assignedTeacherIds.addAll(additionalTeachers.stream().map(Teacher::getId).toList());
-                } else {
-                    for (Entry entry : schedule.getEntries()) {
-                        if (entry.getTimeSlot().equals(timeSlot) && entry.getRoomId().equals(room.getId().toString())) {
-                            List<Teacher> assignedTeachers = assignTeachers(availableTeachers, entry.getTeachersRequired(), timeSlot);
-                            entry.setAssignedTeachers(assignedTeachers);
-
-                            roomAssignments.computeIfAbsent(key, k -> new ArrayList<>()).add(entry);
-                            availableTeachers.removeAll(assignedTeachers);
-
-                            // Track assigned teachers
-                            assignedTeacherIds.addAll(assignedTeachers.stream().map(Teacher::getId).toList());
-                        }
-                    }
                 }
             }
 
             teacherAssignmentsPerSlot.put(timeSlot, assignedTeacherIds);
         }
-
-
 
         model.addAttribute("schedule", schedule);
         model.addAttribute("rooms", rooms);
@@ -635,6 +594,51 @@ public class HomeController {
 
         return "generateSchedule";
     }
+
+    private void processRequiredTimes(
+            List<Teacher> teachers,
+            Map<String, Entry> hardRestrictionEntries,
+            Map<String, Set<Long>> teacherAssignmentsPerSlot,
+            Schedule schedule
+    ) {
+        for (Teacher teacher : teachers) {
+            if (teacher.getRequiredTimeStart() != null && teacher.getRequiredTimeEnd() != null && teacher.getRequiredRoom() != null) {
+                LocalTime start = teacher.getRequiredTimeStart();
+                LocalTime end = teacher.getRequiredTimeEnd();
+                Room requiredRoom = teacher.getRequiredRoom();
+
+                for (LocalTime current = start; current.isBefore(end); current = current.plusMinutes(5)) {
+                    LocalTime next = current.plusMinutes(5);
+                    String timeSlot = current.format(DateTimeFormatter.ofPattern("hh:mm a")) + " - " + next.format(DateTimeFormatter.ofPattern("hh:mm a"));
+                    String key = requiredRoom.getId() + "_" + timeSlot;
+
+                    // Check existing or create a new entry
+                    Entry existingEntry = hardRestrictionEntries.getOrDefault(key, schedule.getEntries().stream()
+                            .filter(entry -> entry.getTimeSlot().equals(timeSlot) && entry.getRoomId().equals(requiredRoom.getId().toString()))
+                            .findFirst()
+                            .orElse(new Entry()));
+
+                    if (existingEntry.getAssignedTeachers() != null &&
+                            existingEntry.getAssignedTeachers().size() >= existingEntry.getTeachersRequired()) {
+                        continue; // Skip if the slot is already full
+                    }
+
+                    String originalEventName = existingEntry.getEventName() != null ? existingEntry.getEventName() + ", " : "";
+                    existingEntry.setEventName(originalEventName + "Required Time: " + teacher.getName());
+
+                    List<Teacher> assignedTeachers = new ArrayList<>(existingEntry.getAssignedTeachers() != null ? existingEntry.getAssignedTeachers() : new ArrayList<>());
+                    if (!assignedTeachers.contains(teacher)) assignedTeachers.add(teacher);
+
+                    existingEntry.setTeachersRequired(Math.max(existingEntry.getTeachersRequired(), assignedTeachers.size()));
+                    existingEntry.setAssignedTeachers(assignedTeachers);
+
+                    hardRestrictionEntries.put(key, existingEntry);
+                    teacherAssignmentsPerSlot.computeIfAbsent(timeSlot, k -> new HashSet<>()).add(teacher.getId());
+                }
+            }
+        }
+    }
+
 
 
 
