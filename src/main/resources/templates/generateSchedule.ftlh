@@ -35,7 +35,21 @@
                 </td>
             </#list>
             <td>
-
+                <!-- Check if teacherBreaks exists and has content -->
+                <#if teacherBreaks?has_content>
+                    <!-- Safely iterate over the keys in teacherBreaks -->
+                    <#list teacherBreaks?keys as teacher>
+                        <!-- Safely access teacherBreaks[teacher] -->
+                        <#list teacherBreaks[teacher]![] as breakEntry>
+                            <!-- Check if the current breakEntry's timeSlot matches the timeSlot -->
+                            <#if breakEntry.timeSlot == timeSlot>
+                                ${teacher.name} (${breakEntry.timeSlot})<br>
+                            </#if>
+                        </#list>
+                    </#list>
+                <#else>
+                    No breaks
+                </#if>
             </td>
         </tr>
     </#list>
