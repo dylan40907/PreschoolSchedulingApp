@@ -35,15 +35,18 @@
                 </td>
             </#list>
             <td>
-                <!-- Check if teacherBreaks exists and has content -->
+                <!-- List which teachers are on break during this timeSlot -->
                 <#if teacherBreaks?has_content>
-                    <!-- Safely iterate over the keys in teacherBreaks -->
-                    <#list teacherBreaks?keys as teacher>
-                        <!-- Safely access teacherBreaks[teacher] -->
-                        <#list teacherBreaks[teacher]![] as breakEntry>
-                            <!-- Check if the current breakEntry's timeSlot matches the timeSlot -->
+                    <!-- teacherBreaks?keys returns a list of String IDs (ex: "1","2",...) -->
+                    <#list teacherBreaks?keys as teacherId>
+                        <!-- Retrieve the list of breaks for teacherId -->
+                        <#assign breakList = teacherBreaks[teacherId]![]>
+                        <#list breakList as breakEntry>
+                        <#-- If this break's timeSlot matches the current timeSlot -->
                             <#if breakEntry.timeSlot == timeSlot>
-                                ${teacher.name} (${breakEntry.timeSlot})<br>
+                                <!-- Retrieve the teacher object from teacherIdMap -->
+                                <#assign teacherObj = teacherIdMap[teacherId]!>
+                                ${teacherObj.name} (Break)<br>
                             </#if>
                         </#list>
                     </#list>
