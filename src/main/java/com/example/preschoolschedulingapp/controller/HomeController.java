@@ -563,7 +563,6 @@ public class HomeController {
         // Schedule breaks for each teacher
         for (Teacher teacher : allTeachers) {
             List<BreakEntry> breaksForThisTeacher = scheduleBreaksForTeacher(teacher, hardRestrictionEntries, teacherAssignmentsPerSlot, timeSlotsList);
-            // Use String.valueOf(...) so the key is a String, not a Long
             teacherBreaks.put(String.valueOf(teacher.getId()), breaksForThisTeacher);
 
             // Remove teacher from any assigned time if that time is now used for a break
@@ -573,7 +572,10 @@ public class HomeController {
         // Populate remaining schedule entries (regular entries)
         Map<String, List<Entry>> roomAssignments = new HashMap<>();
 
-        for (String timeSlot : timeSlotsList) {
+        // We iterate over the timeSlot list with an index so we can see the "previous" timeslot for continuity
+        for (int i = 0; i < timeSlotsList.size(); i++) {
+            String timeSlot = timeSlotsList.get(i);
+
             // Use the updated findAvailableTeachers to exclude those on break
             List<Teacher> availableTeachers = findAvailableTeachers(allTeachers, timeSlot, teacherBreaks);
 
@@ -583,6 +585,29 @@ public class HomeController {
 
             for (Room room : rooms) {
                 String key = room.getId() + "_" + timeSlot;
+
+                // [CHANGE #2] - We attempt to preserve continuity by preferring any teacher
+                // who was in the same room during the previous timeslot (if i > 0).
+                if (i > 0) {
+                    String prevTimeSlot = timeSlotsList.get(i - 1);
+                    String prevKey = room.getId() + "_" + prevTimeSlot;
+                    List<Entry> prevEntries = roomAssignments.getOrDefault(prevKey, new ArrayList<>());
+                    // Gather all teachers assigned to that room in the previous timeslot
+                    Set<Teacher> preferredContinuityTeachers = new HashSet<>();
+                    for (Entry prevEntry : prevEntries) {
+                        if (prevEntry.getAssignedTeachers() != null) {
+                            preferredContinuityTeachers.addAll(prevEntry.getAssignedTeachers());
+                        }
+                    }
+                    // Now reorder "availableTeachers" so that teachers in preferredContinuityTeachers come first
+                    availableTeachers.sort((t1, t2) -> {
+                        boolean t1Preferred = preferredContinuityTeachers.contains(t1);
+                        boolean t2Preferred = preferredContinuityTeachers.contains(t2);
+                        if (t1Preferred && !t2Preferred) return -1;  // t1 goes first
+                        if (t2Preferred && !t1Preferred) return 1;   // t2 goes first
+                        return 0; // equal
+                    });
+                }
 
                 if (hardRestrictionEntries.containsKey(key)) {
                     Entry hardEntry = hardRestrictionEntries.get(key);
@@ -860,7 +885,6 @@ public class HomeController {
     }
 
     private boolean isTeacherOnBreak(Teacher teacher, String timeSlot, Map<String, List<BreakEntry>> teacherBreaks) {
-        // Convert teacher.getId() to String to match the teacherBreaks map
         String teacherKey = String.valueOf(teacher.getId());
         List<BreakEntry> breaks = teacherBreaks.getOrDefault(teacherKey, new ArrayList<>());
         for (BreakEntry b : breaks) {
@@ -883,9 +907,6 @@ public class HomeController {
         return assignedTeachers;
     }
 
-    /**
-     * Generate 5-minute time slots from 7:30 AM to 5:55 PM.
-     */
     private List<String> generateTimeSlots() {
         List<String> timeSlots = new ArrayList<>();
         LocalTime startTime = LocalTime.of(7, 30);
@@ -902,6 +923,10 @@ public class HomeController {
         return timeSlots;
     }
 
+    /**
+     * [CHANGE #1] - In processRequiredTimes, if a priority teacher is assigned,
+     * remove any conflicting non-priority teacher so that teacher can be freed up.
+     */
     private void processRequiredTimes(
             List<Teacher> teachers,
             Map<String, Entry> hardRestrictionEntries,
@@ -928,16 +953,39 @@ public class HomeController {
                                 .orElse(new Entry());
                     }
 
-                    if (existingEntry.getAssignedTeachers() != null &&
-                            existingEntry.getAssignedTeachers().size() >= existingEntry.getTeachersRequired()) {
-                        continue; // Skip if the slot is already full
+                    // If slot is full, but we have a priority teacher, forcibly remove non-priority teacher(s).
+                    if (isPriority && existingEntry.getAssignedTeachers() != null
+                            && existingEntry.getAssignedTeachers().size() >= existingEntry.getTeachersRequired()) {
+                        // Remove any teacher who does NOT have priority from this entry
+                        existingEntry.getAssignedTeachers().removeIf(t -> !t.hasPriority());
+                        // Also remove them from teacherAssignmentsPerSlot, so they're free for other rooms
+                        Set<Long> slotAssignments = teacherAssignmentsPerSlot.getOrDefault(timeSlot, new HashSet<>());
+                        Entry finalExistingEntry = existingEntry;
+                        slotAssignments.removeIf(tid -> {
+                            Teacher assignedT = finalExistingEntry.getAssignedTeachers().stream()
+                                    .filter(x -> x.getId().equals(tid))
+                                    .findAny().orElse(null);
+                            // If we can't find them in assignedTeachers => they were removed
+                            return (assignedT == null);
+                        });
+                        teacherAssignmentsPerSlot.put(timeSlot, slotAssignments);
                     }
 
+                    if (existingEntry.getAssignedTeachers() != null &&
+                            existingEntry.getAssignedTeachers().size() >= existingEntry.getTeachersRequired()) {
+                        // Still full after the removal => skip
+                        continue;
+                    }
+
+                    // If not full, or we are a priority teacher who just freed up space, add the teacher
                     if (isPriority || existingEntry.getEventName() == null || !existingEntry.getEventName().contains("Hard Restriction")) {
                         String originalEventName = existingEntry.getEventName() != null ? existingEntry.getEventName() + ", " : "";
                         existingEntry.setEventName(originalEventName + "Required Time: " + teacher.getName());
 
-                        List<Teacher> assignedTeachers = new ArrayList<>(existingEntry.getAssignedTeachers() != null ? existingEntry.getAssignedTeachers() : new ArrayList<>());
+                        List<Teacher> assignedTeachers = new ArrayList<>(existingEntry.getAssignedTeachers() != null
+                                ? existingEntry.getAssignedTeachers()
+                                : new ArrayList<>());
+
                         if (!assignedTeachers.contains(teacher)) assignedTeachers.add(teacher);
 
                         existingEntry.setTeachersRequired(existingEntry.getTeachersRequired() > 0 ? existingEntry.getTeachersRequired() : 2);
@@ -953,7 +1001,6 @@ public class HomeController {
 
     /**
      * Make sure this class is public so the FTL can access it without errors.
-     * Or move it into its own file as a top-level class in the same package.
      */
     public static class BreakEntry {
         private String timeSlot;
@@ -972,5 +1019,6 @@ public class HomeController {
             this.timeSlot = timeSlot;
         }
     }
+
 
 }
