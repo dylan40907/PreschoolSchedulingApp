@@ -510,7 +510,9 @@ public class HomeController {
                     teacherAssignmentsPerSlot,
                     timeSlotsList,
                     forced,
-                    teacherUsedLongBreak
+                    teacherUsedLongBreak,
+                    allTeachers,
+                    teacherBreaks
             );
             forced.addAll(autoBreaks);
 
@@ -520,7 +522,12 @@ public class HomeController {
         }
 
         // 7) fill coverage
+        // -------------------------------------------------------------------
+// 7) fill coverage
+// -------------------------------------------------------------------
         Map<String, List<Entry>> roomAssignments = new HashMap<>();
+
+        System.out.println("=== Step 7: Filling normal coverage for each 5-min timeslot ===");
 
         for (int i = 0; i < timeSlotsList.size(); i++) {
             String ts = timeSlotsList.get(i);
@@ -592,6 +599,8 @@ public class HomeController {
             teacherAssignmentsPerSlot.put(ts, assignedIds);
         }
 
+        System.out.println("=== End of Step 7 coverage fill ===");
+
         // 8) fill Break room
         fillBreakRoomAssignments(schedule, rooms, teacherBreaks, roomAssignments);
 
@@ -609,8 +618,52 @@ public class HomeController {
         model.addAttribute("timeSlots", timeSlotsList);
         model.addAttribute("teacherBreaks", teacherBreaks);
         model.addAttribute("teacherIdMap", teacherIdMap);
+        debugFinalCoverage(roomAssignments, rooms, timeSlotsList);
         return "generateSchedule";
     }
+
+    /**
+     * Dump final coverage details for each Room + timeslot from roomAssignments.
+     * This shows how many teachers ended up assigned vs the teachersRequired field,
+     * as well as the actual teacher names.
+     *
+     * Call it at the end of generateSchedule(...) to see the final state.
+     */
+    private void debugFinalCoverage(Map<String, List<Entry>> roomAssignments,
+                                    List<Room> rooms,
+                                    List<String> allTimeSlots) {
+        System.out.println("\n=== Final Coverage Debug ===");
+        for (String ts : allTimeSlots) {
+            System.out.println(" Timeslot: " + ts);
+            for (Room r : rooms) {
+                String key = r.getId() + "_" + ts;
+                List<Entry> entries = roomAssignments.get(key);
+                if (entries == null || entries.isEmpty()) {
+                    // No entry at all for this room & timeslot
+                    System.out.println("   Room " + r.getName()
+                            + " => [No entry], coverage=0");
+                    continue;
+                }
+                // Usually there's just one Entry in that slot for the room,
+                // but if you do have multiple, we show them all:
+                for (Entry e : entries) {
+                    List<Teacher> assigned = (e.getAssignedTeachers() == null)
+                            ? Collections.emptyList()
+                            : e.getAssignedTeachers();
+                    int coverCount = assigned.size();
+                    int needed = e.getTeachersRequired();
+                    System.out.println("   Room " + r.getName()
+                            + " => assigned=" + coverCount
+                            + ", required=" + needed
+                            + ", teachers=" + assigned.stream()
+                            .map(Teacher::getName)
+                            .collect(Collectors.joining(", ")));
+                }
+            }
+        }
+        System.out.println("=== End of Final Coverage Debug ===\n");
+    }
+
 
     // =============== UTILITY METHODS ===============
 
@@ -920,6 +973,21 @@ public class HomeController {
      * (1) remove the teacher from coverage via removeTeacherFromAssignedBreakSlots(...)
      * (2) also mark them in teacherAssignmentsPerSlot so they won't be re‐assigned in fill coverage.
      */
+    /**
+     * Attempts to schedule short and/or long breaks for a single teacher, starting around
+     * 90 minutes after their start time. Each break is placed only if coverage can stay
+     * sufficient (see canSafelyTakeBreak logic).
+     *
+     * @param teacher                the teacher for whom we’re scheduling breaks
+     * @param userHardEntries        map of user-hard restrictions
+     * @param schedule               the Schedule object
+     * @param teacherAssignmentsPerSlot map of timeSlot -> set of teacherIds
+     * @param allTimeSlots           a list of all 5-min increments
+     * @param existingBreaks         any forced or previously assigned breaks for this teacher
+     * @param teacherUsedLongBreak   a set of teacherIds that have already taken their long break
+     * @param allTeachers            the complete list of teachers (needed to find substitutes)
+     * @param teacherBreaks          map of teacherId -> list of BreakEntry (so we know who’s on break)
+     */
     private List<BreakEntry> scheduleBreaksForTeacher(
             Teacher teacher,
             Map<String, Entry> userHardEntries,
@@ -927,7 +995,9 @@ public class HomeController {
             Map<String, Set<Long>> teacherAssignmentsPerSlot,
             List<String> allTimeSlots,
             List<BreakEntry> existingBreaks,
-            Set<Long> teacherUsedLongBreak
+            Set<Long> teacherUsedLongBreak,
+            List<Teacher> allTeachers,
+            Map<String, List<BreakEntry>> teacherBreaks
     ) {
         List<BreakEntry> result = new ArrayList<>();
 
@@ -936,29 +1006,29 @@ public class HomeController {
 
         boolean skipLong = teacherUsedLongBreak.contains(teacher.getId());
 
-        // We'll build a small plan: first short break, then long break, then the remaining short breaks
+        // 1) Build a plan of short break(s) and possibly one long break
         List<PlannedBreak> plan = new ArrayList<>();
         int shortIncrements = 2; // 10 min => 2 increments
 
-        // 1) If teacher has at least 1 short break, schedule one first
+        // If teacher has at least 1 short break, schedule one first
         if (shortBreaks > 0) {
             plan.add(new PlannedBreak(shortIncrements, "SHORT"));
             shortBreaks--;
         }
 
-        // 2) If the teacher has a long break not yet used
+        // If the teacher has a long break not yet used
         int longIncrements = longBreakLength / 5;
         if (longIncrements > 0 && !skipLong) {
             plan.add(new PlannedBreak(longIncrements, "LONG"));
         }
 
-        // 3) Add any remaining short breaks
+        // Add any remaining short breaks
         while (shortBreaks > 0) {
             plan.add(new PlannedBreak(shortIncrements, "SHORT"));
             shortBreaks--;
         }
 
-        // We'll start searching for the first break after 90 min
+        // 2) We’ll start searching for the first break after 90 min
         LocalTime earliestStart = teacher.getStartTime().plusMinutes(90);
 
         // If there's already forced breaks that run later, push earliestStart
@@ -967,11 +1037,20 @@ public class HomeController {
             earliestStart = forcedBreakLatestEnd;
         }
 
-        // 4) Try to place each planned break
+        // 3) Try to place each planned break
         for (PlannedBreak pb : plan) {
+            // We now pass allTeachers & teacherBreaks into tryPlaceBreakBlock
             List<String> chunk = tryPlaceBreakBlock(
-                    teacher, pb.increments, earliestStart, allTimeSlots,
-                    userHardEntries, schedule, teacherAssignmentsPerSlot, existingBreaks
+                    teacher,
+                    pb.increments,
+                    earliestStart,
+                    allTimeSlots,
+                    userHardEntries,
+                    schedule,
+                    teacherAssignmentsPerSlot,
+                    existingBreaks,
+                    allTeachers,
+                    teacherBreaks
             );
 
             if (!chunk.isEmpty()) {
@@ -980,7 +1059,7 @@ public class HomeController {
                     result.add(new BreakEntry(s));
 
                     // Also ensure the teacher is considered "assigned" at that slot
-                    // so that step 7 fill coverage won't put them back in coverage
+                    // so that the fill coverage step won't put them back in coverage
                     teacherAssignmentsPerSlot
                             .computeIfAbsent(s, x -> new HashSet<>())
                             .add(teacher.getId());
@@ -1001,8 +1080,6 @@ public class HomeController {
         return result;
     }
 
-
-
     private LocalTime findLatestBreakEnd(List<BreakEntry> breaks, LocalTime teacherStart) {
         LocalTime out = teacherStart.plusMinutes(90);
         for (BreakEntry b : breaks) {
@@ -1022,9 +1099,11 @@ public class HomeController {
             Map<String, Entry> userHardEntries,
             Schedule schedule,
             Map<String, Set<Long>> teacherAssignmentsPerSlot,
-            List<BreakEntry> existingBreaks
+            List<BreakEntry> existingBreaks,
+            List<Teacher> allTeachers,
+            Map<String, List<BreakEntry>> teacherBreaks
     ) {
-        // same logic, but no changes needed
+        // same logic except we add 'allTeachers' + 'teacherBreaks' to calls to canSafelyTakeBreak
         Set<String> forcedBreakSlots = existingBreaks.stream()
                 .map(BreakEntry::getTimeSlot)
                 .collect(Collectors.toSet());
@@ -1059,12 +1138,12 @@ public class HomeController {
                 .sorted(Comparator.comparing(TimeSlot::getStart))
                 .toArray(TimeSlot[]::new);
 
-        for (int i=0; i<arr.length; i++) {
+        for (int i = 0; i < arr.length; i++) {
             out.clear();
             out.add(arr[i].toString());
-            int j = i+1;
-            while(j < arr.length && out.size()<neededIncrements) {
-                TimeSlot prev = TimeSlot.fromString(out.get(out.size()-1));
+            int j = i + 1;
+            while (j < arr.length && out.size() < neededIncrements) {
+                TimeSlot prev = TimeSlot.fromString(out.get(out.size() - 1));
                 TimeSlot nxt = arr[j];
                 if (!nxt.getStart().equals(prev.getEnd())) {
                     break;
@@ -1075,7 +1154,9 @@ public class HomeController {
             if (out.size() == neededIncrements) {
                 boolean feasible = true;
                 for (String s : out) {
-                    if (!canSafelyTakeBreak(teacher, s, schedule, userHardEntries, teacherAssignmentsPerSlot)) {
+                    // Now we pass 'allTeachers' & 'teacherBreaks' to canSafelyTakeBreak
+                    if (!canSafelyTakeBreak(teacher, s, schedule, userHardEntries,
+                            teacherAssignmentsPerSlot, allTeachers, teacherBreaks)) {
                         feasible = false;
                         break;
                     }
@@ -1087,6 +1168,7 @@ public class HomeController {
         }
         return Collections.emptyList();
     }
+
 
     /**
      * Convert a teacher’s noBreakPeriods into 5-min increments.
@@ -1110,23 +1192,20 @@ public class HomeController {
     }
 
     /**
-     * Check if removing 'teacher' from coverage at 'slotStr' would drop coverage
-     * below the 'teachersRequired' for any entry. Originally, if coverage would
-     * fall below the required number, we returned false to block the break.
-     *
-     * Now, we allow the break anyway. This ensures that teachers can break even
-     * if coverage is not perfect. If you want strict coverage (never below required),
-     * you could revert the old logic—but that means teachers with required times
-     * will never get a break.
+     * We now block the teacher's break if removing them would
+     * leave coverage below teachersRequired and we cannot find
+     * a substitute teacher to fill that gap.
      */
     private boolean canSafelyTakeBreak(
             Teacher teacher,
             String slotStr,
             Schedule schedule,
             Map<String, Entry> userHardEntries,
-            Map<String, Set<Long>> teacherAssignmentsPerSlot
+            Map<String, Set<Long>> teacherAssignmentsPerSlot,
+            List<Teacher> allTeachers,
+            Map<String, List<BreakEntry>> teacherBreaks
     ) {
-        // Gather all coverage for that slot (both userHard + normal schedule)
+        // Collect all coverage at this slot
         List<Entry> slotEntries = new ArrayList<>();
         for (Map.Entry<String, Entry> me : userHardEntries.entrySet()) {
             if (me.getKey().endsWith("_" + slotStr)) {
@@ -1140,11 +1219,11 @@ public class HomeController {
         }
         slotEntries = slotEntries.stream().distinct().collect(Collectors.toList());
 
-        System.out.println("[canSafelyTakeBreak] Checking if " + teacher.getName() +
-                " can take a break at " + slotStr + ". Found " + slotEntries.size() + " entries in that slot.");
+        // We'll track whether we had to do any sub assignment
+        // so we can revert if something fails.
+        List<Runnable> revertActions = new ArrayList<>();
 
-        // We no longer block the break if coverage < required.
-        // We'll just show a note if that would happen, but we let them break anyway.
+        // Check each entry in this timeslot
         for (Entry e : slotEntries) {
             if (e.getAssignedTeachers() == null) continue;
             if (!e.getAssignedTeachers().contains(teacher)) continue;
@@ -1152,22 +1231,95 @@ public class HomeController {
             int needed = (e.getTeachersRequired() < 1) ? 1 : e.getTeachersRequired();
             int afterRemoval = e.getAssignedTeachers().size() - 1;
 
-            System.out.println("   [canSafelyTakeBreak] " + teacher.getName()
-                    + " is assigned to an entry requiring " + needed + " teacher(s). "
-                    + "If removed, coverage = " + afterRemoval);
-
+            // If removing teacher would drop coverage below needed => gap
             if (afterRemoval < needed) {
-                System.out.println("   [canSafelyTakeBreak] Coverage would drop below 'required' " +
-                        "but we are allowing the break anyway.");
+                int gap = needed - afterRemoval;
+
+                // Find possible subs
+                List<Teacher> subCandidates = findSubCandidatesForSlot(slotStr, allTeachers, teacherAssignmentsPerSlot, teacherBreaks);
+
+                // We only want to pick exactly 'gap' number of subs from that list
+                if (subCandidates.size() < gap) {
+                    // Not enough subs => block break
+                    System.out.println("   [canSafelyTakeBreak] BLOCK => coverage short. No break for "
+                            + teacher.getName() + " at " + slotStr + " (need " + gap + " subs, have only " + subCandidates.size() + ")");
+                    // revert any partial changes so far
+                    for (Runnable r : revertActions) {
+                        r.run(); // revert
+                    }
+                    return false;
+                } else {
+                    // We *can* fill coverage with 'gap' subs. Let's assign them right now
+                    List<Teacher> subPick = subCandidates.subList(0, gap);
+                    System.out.println("   [canSafelyTakeBreak] " + teacher.getName()
+                            + " => removing from coverage, substituting "
+                            + subPick.stream().map(Teacher::getName).collect(Collectors.joining(", "))
+                            + " at " + slotStr);
+
+                    // Remove the teacher from coverage in this entry
+                    e.getAssignedTeachers().remove(teacher);
+
+                    // Revert action in case we fail on a *later* entry
+                    revertActions.add(() -> {
+                        // revert removing the teacher
+                        e.getAssignedTeachers().add(teacher);
+                        // revert adding the subs
+                        e.getAssignedTeachers().removeAll(subPick);
+                    });
+
+                    // Add the sub(s) to coverage
+                    e.getAssignedTeachers().addAll(subPick);
+
+                    // Also update teacherAssignmentsPerSlot
+                    Set<Long> assignedSet = teacherAssignmentsPerSlot.getOrDefault(slotStr, new HashSet<>());
+                    assignedSet.remove(teacher.getId());
+                    for (Teacher sub : subPick) {
+                        assignedSet.add(sub.getId());
+                    }
+                    teacherAssignmentsPerSlot.put(slotStr, assignedSet);
+
+                    // Another revert action for the sub assignments
+                    revertActions.add(() -> {
+                        for (Teacher sub : subPick) {
+                            e.getAssignedTeachers().remove(sub);
+                            assignedSet.remove(sub.getId());
+                        }
+                        e.getAssignedTeachers().add(teacher);
+                        assignedSet.add(teacher.getId());
+                    });
+                }
             }
         }
 
-        // Let them break
-        System.out.println("[canSafelyTakeBreak] " + teacher.getName() + " can break at " + slotStr);
+        // If we get here, we never blocked => coverage is fine
+        System.out.println("[canSafelyTakeBreak] => ALLOW break for " + teacher.getName() + " at " + slotStr);
         return true;
     }
 
+    /**
+     * Find possible substitute teachers for the given slot,
+     * i.e. teachers who are not assigned, not on break, and within work hours.
+     * We do not remove them from coverage here; we only see if they're available.
+     */
+    private List<Teacher> findSubCandidatesForSlot(
+            String slotStr,
+            List<Teacher> allTeachers,
+            Map<String, Set<Long>> teacherAssignmentsPerSlot,
+            Map<String, List<BreakEntry>> teacherBreaks
+    ) {
+        // All teachers not assigned at this slot
+        Set<Long> assignedSet = teacherAssignmentsPerSlot.getOrDefault(slotStr, Collections.emptySet());
 
+        // We can re-use your existing findAvailableTeachers, then filter out assignedSet
+        List<Teacher> available = new ArrayList<>();
+        for (Teacher t : allTeachers) {
+            if (!assignedSet.contains(t.getId()) && isTeacherWithinWorkHours(t, slotStr)
+                    && !isTeacherOnBreak(t, slotStr, teacherBreaks)) {
+                available.add(t);
+            }
+        }
+        return available;
+    }
 
     /**
      * For each newly scheduled break timeslot for this teacher, remove them from coverage
@@ -1184,46 +1336,16 @@ public class HomeController {
     ) {
         for (BreakEntry b : breakList) {
             String slot = b.getTimeSlot();
-            System.out.println("[removeTeacherFromAssignedBreakSlots] Attempting to remove "
-                    + teacher.getName() + " from slot " + slot);
+            System.out.println("[removeTeacherFromAssignedBreakSlots] Attempting to mark teacher "
+                    + teacher.getName() + " as unavailable at slot=" + slot);
 
-            // Remove from userHard coverage
-            List<String> hrKeys = userHardEntries.keySet().stream()
-                    .filter(k -> k.endsWith("_" + slot))
-                    .collect(Collectors.toList());
-            for (String k : hrKeys) {
-                Entry e = userHardEntries.get(k);
-                if (e != null && e.getAssignedTeachers() != null) {
-                    if (e.getAssignedTeachers().contains(teacher)) {
-                        System.out.println("   [removeTeacherFromAssignedBreakSlots] Removing "
-                                + teacher.getName() + " from userHard Entry " + k);
-                        e.getAssignedTeachers().remove(teacher);
-                    }
-                }
-            }
-
-            // Remove from normal schedule coverage
-            for (Entry e : schedule.getEntries()) {
-                if (slot.equals(e.getTimeSlot()) && e.getAssignedTeachers() != null) {
-                    if (e.getAssignedTeachers().contains(teacher)) {
-                        System.out.println("   [removeTeacherFromAssignedBreakSlots] Removing "
-                                + teacher.getName() + " from normal schedule Entry in "
-                                + "roomId=" + e.getRoomId() + ", slot=" + slot);
-                        e.getAssignedTeachers().remove(teacher);
-                    }
-                }
-            }
-
-            // Either way, we do want teacher to remain "unavailable" for coverage
-            // in that same slot, so we forcibly mark them as assigned in break:
+            // Instead of physically removing them from e.getAssignedTeachers() again,
+            // you could just do:
             teacherAssignmentsPerSlot
                     .computeIfAbsent(slot, x -> new HashSet<>())
                     .add(teacher.getId());
         }
     }
-
-
-
 
 
     // ---------- Additional Utility ----------
@@ -1349,6 +1471,10 @@ public class HomeController {
     }
 
     private List<Teacher> assignTeachers(List<Teacher> available, int required, String timeSlot) {
+        System.out.println("[assignTeachers] slot=" + timeSlot
+                + ", required=" + required
+                + ", available=" + available.stream().map(Teacher::getName).collect(Collectors.joining(", ")));
+
         List<Teacher> assigned = new ArrayList<>();
         for (Teacher t : available) {
             if (assigned.size() < required) {
@@ -1357,8 +1483,11 @@ public class HomeController {
                 break;
             }
         }
+        System.out.println("[assignTeachers] slot=" + timeSlot
+                + " => picks=" + assigned.stream().map(Teacher::getName).collect(Collectors.joining(", ")));
         return assigned;
     }
+
 
     private List<Teacher> deduplicateTeachers(List<Teacher> assigned) {
         LinkedHashMap<Long, Teacher> map = new LinkedHashMap<>();
