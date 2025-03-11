@@ -83,7 +83,12 @@ public class HomeController {
             @RequestParam(required = false) Long requiredRoom,
             @RequestParam(required = false, defaultValue = "0") int numTenMinBreaks,
             @RequestParam(required = false, defaultValue = "0") int longBreakLength,
-            @RequestParam(required = false, defaultValue = "false") boolean hasPriority
+            @RequestParam(required = false, defaultValue = "false") boolean hasPriority,
+
+            // NEW: arrays for teacher-level hard restrictions
+            @RequestParam(required = false, name = "tHardStart") List<String> tHardStartTimes,
+            @RequestParam(required = false, name = "tHardEnd") List<String> tHardEndTimes,
+            @RequestParam(required = false, name = "tHardRoom") List<Long> tHardRoomIds
     ) {
         Teacher teacher = new Teacher();
         teacher.setName(name);
@@ -112,9 +117,30 @@ public class HomeController {
         teacher.setNumTenMinBreaks(numTenMinBreaks);
         teacher.setLongBreakLength(longBreakLength);
 
+        // --- NEW: parse the teacher-level Hard Restrictions from the arrays ---
+        List<TeacherHardRestriction> teacherHRs = new ArrayList<>();
+        if (tHardStartTimes != null && tHardEndTimes != null && tHardRoomIds != null) {
+            for (int i = 0; i < tHardStartTimes.size(); i++) {
+                String startStr = tHardStartTimes.get(i);
+                String endStr = tHardEndTimes.get(i);
+                Long rmId = tHardRoomIds.get(i);
+
+                if (startStr == null || startStr.isBlank()) continue;
+                if (endStr == null || endStr.isBlank()) continue;
+                if (rmId == null) continue;
+
+                LocalTime st = LocalTime.parse(startStr.trim(), DateTimeFormatter.ofPattern("hh:mm a"));
+                LocalTime en = LocalTime.parse(endStr.trim(), DateTimeFormatter.ofPattern("hh:mm a"));
+
+                teacherHRs.add(new TeacherHardRestriction(st, en, rmId));
+            }
+        }
+        teacher.setHardRestrictions(teacherHRs);
+
         teacherRepository.save(teacher);
         return "redirect:/teacherView";
     }
+
 
     @GetMapping("/editTeacher/{id}")
     public String editTeacher(@PathVariable Long id, Model model) {
@@ -162,7 +188,12 @@ public class HomeController {
             @RequestParam(required = false) Long requiredRoom,
             @RequestParam(required = false, defaultValue = "0") int numTenMinBreaks,
             @RequestParam(required = false, defaultValue = "0") int longBreakLength,
-            @RequestParam(required = false, defaultValue = "false") boolean hasPriority
+            @RequestParam(required = false, defaultValue = "false") boolean hasPriority,
+
+            // NEW: parse arrays for teacher-level restrictions
+            @RequestParam(required = false, name = "tHardStart") List<String> tHardStartTimes,
+            @RequestParam(required = false, name = "tHardEnd") List<String> tHardEndTimes,
+            @RequestParam(required = false, name = "tHardRoom") List<Long> tHardRoomIds
     ) {
         Teacher teacher = teacherRepository.findById(id).orElse(null);
 
@@ -193,9 +224,30 @@ public class HomeController {
         teacher.setNumTenMinBreaks(numTenMinBreaks);
         teacher.setLongBreakLength(longBreakLength);
 
+        // NEW: parse the teacher-level Hard Restrictions
+        List<TeacherHardRestriction> teacherHRs = new ArrayList<>();
+        if (tHardStartTimes != null && tHardEndTimes != null && tHardRoomIds != null) {
+            for (int i = 0; i < tHardStartTimes.size(); i++) {
+                String startStr = tHardStartTimes.get(i);
+                String endStr = tHardEndTimes.get(i);
+                Long rmId = tHardRoomIds.get(i);
+
+                if (startStr == null || startStr.isBlank()) continue;
+                if (endStr == null || endStr.isBlank()) continue;
+                if (rmId == null) continue;
+
+                LocalTime st = LocalTime.parse(startStr.trim(), DateTimeFormatter.ofPattern("hh:mm a"));
+                LocalTime en = LocalTime.parse(endStr.trim(), DateTimeFormatter.ofPattern("hh:mm a"));
+
+                teacherHRs.add(new TeacherHardRestriction(st, en, rmId));
+            }
+        }
+        teacher.setHardRestrictions(teacherHRs);
+
         teacherRepository.save(teacher);
         return "redirect:/teacherView";
     }
+
 
     private Map<LocalTime, LocalTime> parseNoBreakPeriods(String noBreakPeriods) {
         Map<LocalTime, LocalTime> noBreakMap = new HashMap<>();
@@ -434,11 +486,47 @@ public class HomeController {
         List<Room> rooms = (List<Room>) roomRepository.findAll();
         List<Teacher> allTeachers = (List<Teacher>) teacherRepository.findAllById(selectedTeachers);
 
+
         // 1) Hard Restriction coverage
         Map<String, Entry> userHardEntries = processUserHardRestrictions(schedule,
                 restrictionTeachers, timeSlots, restrictionRooms);
 
         Map<String, Set<Long>> teacherAssignmentsPerSlot = buildTeacherAssignmentsMap(userHardEntries, schedule);
+
+        // Right after you have loaded allTeachers:
+
+// Merge each teacher's hardRestrictions into the userHardEntries map
+        Map<String, Entry> teacherLevelEntries = buildTeacherLevelHardRestrictions(allTeachers, schedule);
+        teacherLevelEntries.forEach((k,v) -> {
+            // If there's already an entry from userHard, unify them
+            if (!userHardEntries.containsKey(k)) {
+                userHardEntries.put(k, v);
+            } else {
+                // merge
+                Entry existing = userHardEntries.get(k);
+                // ensure teachersRequired is at least 2
+                if (existing.getTeachersRequired() < 2) {
+                    existing.setTeachersRequired(2);
+                }
+                // combine assigned teachers
+                List<Teacher> existList = existing.getAssignedTeachers();
+                if (existList == null) {
+                    existList = new ArrayList<>();
+                    existing.setAssignedTeachers(existList);
+                }
+                if (v.getAssignedTeachers() != null) {
+                    for (Teacher t : v.getAssignedTeachers()) {
+                        if (!existList.contains(t)) {
+                            existList.add(t);
+                        }
+                    }
+                }
+                // Append eventName
+                String oldName = existing.getEventName() == null ? "" : (existing.getEventName() + ", ");
+                existing.setEventName(oldName + v.getEventName());
+            }
+        });
+
 
         // 2) teacherBreaks (including forced breaks)
         Map<String, List<BreakEntry>> teacherBreaks = new HashMap<>();
@@ -522,33 +610,35 @@ public class HomeController {
         }
 
         // 7) fill coverage
-        // -------------------------------------------------------------------
-// 7) fill coverage
-// -------------------------------------------------------------------
         Map<String, List<Entry>> roomAssignments = new HashMap<>();
 
         System.out.println("=== Step 7: Filling normal coverage for each 5-min timeslot ===");
 
         for (int i = 0; i < timeSlotsList.size(); i++) {
             String ts = timeSlotsList.get(i);
-            List<Teacher> available = findAvailableTeachers(allTeachers, ts, teacherBreaks);
+            // First get everyone who is "available" (not assigned, not on break, in hours):
+            List<Teacher> baseAvailable = findAvailableTeachers(allTeachers, ts, teacherBreaks);
             Set<Long> assignedIds = teacherAssignmentsPerSlot.getOrDefault(ts, new HashSet<>());
-            available.removeIf(t-> assignedIds.contains(t.getId()));
+            // Remove those already assigned
+            baseAvailable.removeIf(t -> assignedIds.contains(t.getId()));
 
-            // continuity logic
             for (Room room : rooms) {
                 String key = room.getId() + "_" + ts;
-                if (i>0) {
-                    String prevSlot = timeSlotsList.get(i-1);
+
+                // For continuity logic, we sort by who was in *this same room* in the previous slot
+                List<Teacher> preferEligible = new ArrayList<>(baseAvailable);
+                if (i > 0) {
+                    String prevSlot = timeSlotsList.get(i - 1);
                     String prevKey = room.getId() + "_" + prevSlot;
                     List<Entry> prevEntries = roomAssignments.getOrDefault(prevKey, new ArrayList<>());
                     Set<Teacher> contTeachers = new HashSet<>();
                     for (Entry pe : prevEntries) {
-                        if (pe.getAssignedTeachers()!=null) {
+                        if (pe.getAssignedTeachers() != null) {
                             contTeachers.addAll(pe.getAssignedTeachers());
                         }
                     }
-                    available.sort((t1,t2)-> {
+                    // Put the continuing teachers first
+                    preferEligible.sort((t1, t2) -> {
                         boolean c1 = contTeachers.contains(t1);
                         boolean c2 = contTeachers.contains(t2);
                         if (c1 && !c2) return -1;
@@ -557,6 +647,10 @@ public class HomeController {
                     });
                 }
 
+                // **Now** filter out anyone who does not prefer this room:
+                preferEligible.removeIf(t -> !canTeachRoom(t, room.getId()));
+
+                // Now handle user-hard or normal coverage
                 if (userHardEntries.containsKey(key)) {
                     Entry hr = userHardEntries.get(key);
                     if (hr.getAssignedTeachers() == null) {
@@ -564,34 +658,35 @@ public class HomeController {
                     }
                     int needed = hr.getTeachersRequired() - hr.getAssignedTeachers().size();
                     if (needed > 0) {
-                        List<Teacher> picks = assignTeachers(available, needed, ts);
+                        List<Teacher> picks = assignTeachers(preferEligible, needed, ts);
                         hr.getAssignedTeachers().addAll(picks);
                         hr.setAssignedTeachers(deduplicateTeachers(hr.getAssignedTeachers()));
-                        available.removeAll(picks);
+                        preferEligible.removeAll(picks);
                         for (Teacher p : picks) {
                             assignedIds.add(p.getId());
                         }
                     }
-                    roomAssignments.computeIfAbsent(key, x-> new ArrayList<>()).add(hr);
+                    roomAssignments.computeIfAbsent(key, x -> new ArrayList<>()).add(hr);
 
                 } else {
                     // normal coverage
                     for (Entry e : schedule.getEntries()) {
-                        if (e.getTimeSlot().equals(ts) && e.getRoomId().equals(room.getId().toString())) {
+                        if (e.getTimeSlot().equals(ts)
+                                && e.getRoomId().equals(room.getId().toString())) {
                             if (e.getAssignedTeachers() == null) {
                                 e.setAssignedTeachers(new ArrayList<>());
                             }
                             int needed = e.getTeachersRequired() - e.getAssignedTeachers().size();
                             if (needed > 0) {
-                                List<Teacher> picks = assignTeachers(available, needed, ts);
+                                List<Teacher> picks = assignTeachers(preferEligible, needed, ts);
                                 e.getAssignedTeachers().addAll(picks);
                                 e.setAssignedTeachers(deduplicateTeachers(e.getAssignedTeachers()));
-                                available.removeAll(picks);
+                                preferEligible.removeAll(picks);
                                 for (Teacher p : picks) {
                                     assignedIds.add(p.getId());
                                 }
                             }
-                            roomAssignments.computeIfAbsent(key, x-> new ArrayList<>()).add(e);
+                            roomAssignments.computeIfAbsent(key, x -> new ArrayList<>()).add(e);
                         }
                     }
                 }
@@ -621,6 +716,56 @@ public class HomeController {
         debugFinalCoverage(roomAssignments, rooms, timeSlotsList);
         return "generateSchedule";
     }
+
+    /**
+     * Builds a map of "roomId_timeSlot" => Entry
+     * based on each Teacher's own hardRestrictions.
+     */
+    private Map<String, Entry> buildTeacherLevelHardRestrictions(List<Teacher> teachers, Schedule schedule) {
+        Map<String, Entry> out = new HashMap<>();
+        DateTimeFormatter fmt = DateTimeFormatter.ofPattern("hh:mm a");
+
+        for (Teacher t : teachers) {
+            if (t.getHardRestrictions() == null) continue;
+
+            for (TeacherHardRestriction thr : t.getHardRestrictions()) {
+                LocalTime start = thr.getStartTime();
+                LocalTime end = thr.getEndTime();
+                Long rmId = thr.getRoomId();
+
+                if (start == null || end == null || rmId == null) continue;
+
+                // For every 5-min increment
+                for (LocalTime cur = start; cur.isBefore(end); cur = cur.plusMinutes(5)) {
+                    LocalTime nxt = cur.plusMinutes(5);
+                    String slotStr = cur.format(fmt) + " - " + nxt.format(fmt);
+                    String key = rmId + "_" + slotStr;
+
+                    Entry e = out.get(key);
+                    if (e == null) {
+                        e = new Entry();
+                        e.setRoomId(rmId.toString());
+                        e.setTimeSlot(slotStr);
+                        e.setSchedule(schedule);
+                        e.setEventName("Hard Restriction (T): " + t.getName());
+                        e.setAssignedTeachers(new ArrayList<>());
+                        e.setTeachersRequired(2); // ensure coverage is 2
+                        out.put(key, e);
+                    } else {
+                        // just append
+                        String oldEvt = (e.getEventName() == null) ? "" : (e.getEventName() + ", ");
+                        e.setEventName(oldEvt + "Hard Restriction (T): " + t.getName());
+                    }
+
+                    if (!e.getAssignedTeachers().contains(t)) {
+                        e.getAssignedTeachers().add(t);
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
 
     /**
      * Dump final coverage details for each Room + timeslot from roomAssignments.
@@ -748,6 +893,8 @@ public class HomeController {
         }
         return out;
     }
+
+    
 
 
 
@@ -1109,6 +1256,7 @@ public class HomeController {
                 .collect(Collectors.toSet());
         Set<String> userHardSlots = findTeacherUserHardRestrictedSlots(teacher, userHardEntries);
         Set<String> noBreakSlots = expandNoBreakPeriods(teacher.getNoBreakPeriods());
+        
 
         List<String> candidate = new ArrayList<>();
         for (String slot : allTimeSlots) {
@@ -1219,14 +1367,16 @@ public class HomeController {
         }
         slotEntries = slotEntries.stream().distinct().collect(Collectors.toList());
 
-        // We'll track whether we had to do any sub assignment
-        // so we can revert if something fails.
+        // We'll track revert actions so if we find a coverage gap in a later entry,
+        // we revert any partial sub assignments.
         List<Runnable> revertActions = new ArrayList<>();
 
-        // Check each entry in this timeslot
         for (Entry e : slotEntries) {
             if (e.getAssignedTeachers() == null) continue;
             if (!e.getAssignedTeachers().contains(teacher)) continue;
+
+            // This is the room's ID for the coverage
+            Long roomId = Long.valueOf(e.getRoomId());
 
             int needed = (e.getTeachersRequired() < 1) ? 1 : e.getTeachersRequired();
             int afterRemoval = e.getAssignedTeachers().size() - 1;
@@ -1235,21 +1385,24 @@ public class HomeController {
             if (afterRemoval < needed) {
                 int gap = needed - afterRemoval;
 
-                // Find possible subs
-                List<Teacher> subCandidates = findSubCandidatesForSlot(slotStr, allTeachers, teacherAssignmentsPerSlot, teacherBreaks);
+                // Find possible subs who also prefer this room
+                List<Teacher> subCandidates = findSubCandidatesForSlot(
+                        slotStr, roomId, allTeachers,
+                        teacherAssignmentsPerSlot, teacherBreaks
+                );
 
-                // We only want to pick exactly 'gap' number of subs from that list
                 if (subCandidates.size() < gap) {
                     // Not enough subs => block break
                     System.out.println("   [canSafelyTakeBreak] BLOCK => coverage short. No break for "
-                            + teacher.getName() + " at " + slotStr + " (need " + gap + " subs, have only " + subCandidates.size() + ")");
+                            + teacher.getName() + " at " + slotStr
+                            + " (need " + gap + " subs, have only " + subCandidates.size() + ")");
                     // revert any partial changes so far
                     for (Runnable r : revertActions) {
                         r.run(); // revert
                     }
                     return false;
                 } else {
-                    // We *can* fill coverage with 'gap' subs. Let's assign them right now
+                    // We can fill coverage with 'gap' subs:
                     List<Teacher> subPick = subCandidates.subList(0, gap);
                     System.out.println("   [canSafelyTakeBreak] " + teacher.getName()
                             + " => removing from coverage, substituting "
@@ -1267,11 +1420,12 @@ public class HomeController {
                         e.getAssignedTeachers().removeAll(subPick);
                     });
 
-                    // Add the sub(s) to coverage
+                    // Add the sub(s) now
                     e.getAssignedTeachers().addAll(subPick);
 
                     // Also update teacherAssignmentsPerSlot
-                    Set<Long> assignedSet = teacherAssignmentsPerSlot.getOrDefault(slotStr, new HashSet<>());
+                    Set<Long> assignedSet = teacherAssignmentsPerSlot
+                            .getOrDefault(slotStr, new HashSet<>());
                     assignedSet.remove(teacher.getId());
                     for (Teacher sub : subPick) {
                         assignedSet.add(sub.getId());
@@ -1296,6 +1450,7 @@ public class HomeController {
         return true;
     }
 
+
     /**
      * Find possible substitute teachers for the given slot,
      * i.e. teachers who are not assigned, not on break, and within work hours.
@@ -1303,23 +1458,46 @@ public class HomeController {
      */
     private List<Teacher> findSubCandidatesForSlot(
             String slotStr,
+            Long roomId,
             List<Teacher> allTeachers,
             Map<String, Set<Long>> teacherAssignmentsPerSlot,
             Map<String, List<BreakEntry>> teacherBreaks
     ) {
-        // All teachers not assigned at this slot
-        Set<Long> assignedSet = teacherAssignmentsPerSlot.getOrDefault(slotStr, Collections.emptySet());
+        Set<Long> alreadyAssigned = teacherAssignmentsPerSlot.getOrDefault(slotStr, Collections.emptySet());
 
-        // We can re-use your existing findAvailableTeachers, then filter out assignedSet
-        List<Teacher> available = new ArrayList<>();
+        List<Teacher> subs = new ArrayList<>();
         for (Teacher t : allTeachers) {
-            if (!assignedSet.contains(t.getId()) && isTeacherWithinWorkHours(t, slotStr)
-                    && !isTeacherOnBreak(t, slotStr, teacherBreaks)) {
-                available.add(t);
+            // Only add if t is not assigned in this slot, is within hours,
+            // not on break, and "canTeachRoom(t, roomId)" is true
+            if (!alreadyAssigned.contains(t.getId())
+                    && isTeacherWithinWorkHours(t, slotStr)
+                    && !isTeacherOnBreak(t, slotStr, teacherBreaks)
+                    && canTeachRoom(t, roomId)) {
+                subs.add(t);
             }
         }
-        return available;
+        return subs;
     }
+
+    /**
+     * Returns true if the teacher’s preferredRooms is empty
+     * (meaning "no preference" => can teach any room),
+     * OR if it contains the room with the given ID.
+     */
+    private boolean canTeachRoom(Teacher t, Long roomId) {
+        if (t.getPreferredRooms() == null || t.getPreferredRooms().isEmpty()) {
+            // No preference => can teach anywhere
+            return true;
+        }
+        // Otherwise, must contain the matching Room ID
+        for (Room r : t.getPreferredRooms()) {
+            if (r.getId().equals(roomId)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
 
     /**
      * For each newly scheduled break timeslot for this teacher, remove them from coverage

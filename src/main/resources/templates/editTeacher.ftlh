@@ -29,7 +29,8 @@
     <br>
 
     <label for="noBreakPeriods">No Break Periods:</label>
-    <input type="text" id="noBreakPeriods" name="noBreakPeriods" value="<#list noBreakPeriodsAsString?keys as startTime>${startTime}-${noBreakPeriodsAsString[startTime]}<#if startTime_has_next>, </#if></#list>">
+    <input type="text" id="noBreakPeriods" name="noBreakPeriods"
+           value="<#list noBreakPeriodsAsString?keys as startTime>${startTime}-${noBreakPeriodsAsString[startTime]}<#if startTime_has_next>, </#if></#list>">
     <br><br>
 
     <label for="requiredTime">Required Time:</label>
@@ -58,11 +59,78 @@
     <input type="checkbox" id="hasPriority" name="hasPriority" value="true" <#if teacher.hasPriority()>checked</#if>>
     <br><br>
 
+    <!-- TEACHER-LEVEL HARD RESTRICTIONS -->
+    <h2>Teacher Hard Restrictions</h2>
+    <div id="thrContainer">
+        <#if teacher.hardRestrictions?has_content>
+            <#list teacher.hardRestrictions as thr>
+                <div class="thrItem">
+                    <label>Start:</label>
+                    <input type="text" name="tHardStart" value="${thr.startTime?string('hh:mm a')}">
+                    <label>End:</label>
+                    <input type="text" name="tHardEnd" value="${thr.endTime?string('hh:mm a')}">
+                    <label>Room:</label>
+                    <select name="tHardRoom">
+                        <option value="">Select Room</option>
+                        <#list rooms as r>
+                            <option value="${r.id}" <#if r.id == thr.roomId>selected</#if>>${r.name}</option>
+                        </#list>
+                    </select>
+                    <button type="button" onclick="removeThr(this)">X</button>
+                </div>
+            </#list>
+        <#else>
+            <!-- If none, display a single blank row -->
+            <div class="thrItem">
+                <label>Start:</label>
+                <input type="text" name="tHardStart" placeholder="09:00 AM">
+                <label>End:</label>
+                <input type="text" name="tHardEnd" placeholder="10:00 AM">
+                <label>Room:</label>
+                <select name="tHardRoom">
+                    <option value="">Select Room</option>
+                    <#list rooms as r>
+                        <option value="${r.id}">${r.name}</option>
+                    </#list>
+                </select>
+                <button type="button" onclick="removeThr(this)">X</button>
+            </div>
+        </#if>
+    </div>
+    <button type="button" onclick="addThr()">Add Another Hard Restriction</button>
+    <br><br>
+    <!-- END TEACHER HR -->
+
     <button type="submit">Save</button>
 </form>
 
-<form action="/deleteTeacher/${teacher.id}" method="post" onsubmit="return confirm('Are you sure you want to delete this teacher?');">
+<form action="/deleteTeacher/${teacher.id}" method="post"
+      onsubmit="return confirm('Are you sure you want to delete this teacher?');">
     <button type="submit" style="color: red;">Delete</button>
 </form>
 
 <a href="/teacherView">Cancel</a>
+
+<script>
+    function addThr() {
+        const container = document.getElementById('thrContainer');
+        const original = container.querySelector('.thrItem');
+        const clone = original.cloneNode(true);
+        // clear the cloned inputs
+        clone.querySelectorAll('input').forEach(i => i.value = '');
+        clone.querySelector('select').selectedIndex = 0;
+        container.appendChild(clone);
+    }
+
+    function removeThr(btn) {
+        const div = btn.closest('.thrItem');
+        const allItems = document.querySelectorAll('.thrItem');
+        if (allItems.length > 1) {
+            div.remove();
+        } else {
+            // if only 1, just clear
+            div.querySelectorAll('input').forEach(i => i.value='');
+            div.querySelector('select').selectedIndex = 0;
+        }
+    }
+</script>

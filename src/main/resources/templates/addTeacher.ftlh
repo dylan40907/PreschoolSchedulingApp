@@ -17,8 +17,7 @@
     <input type="text" id="availability" name="availability">
     <br><br>
 
-    <label>Preferred Rooms:</label>
-    <br>
+    <label>Preferred Rooms:</label><br>
     <#list rooms as room>
         <input type="checkbox" id="room-${room.id}" name="preferredRooms" value="${room.id}">
         <label for="room-${room.id}">${room.name}</label><br>
@@ -55,5 +54,50 @@
     <input type="checkbox" id="hasPriority" name="hasPriority">
     <br><br>
 
+
+    <!-- TEACHER-LEVEL HARD RESTRICTIONS SECTION -->
+    <h2>Teacher Hard Restrictions</h2>
+    <div id="thrContainer">
+        <div class="thrItem">
+            <label>Start:</label>
+            <input type="text" name="tHardStart" placeholder="09:00 AM">
+            <label>End:</label>
+            <input type="text" name="tHardEnd" placeholder="10:00 AM">
+            <label>Room:</label>
+            <select name="tHardRoom">
+                <option value="">Select Room</option>
+                <#list rooms as r>
+                    <option value="${r.id}">${r.name}</option>
+                </#list>
+            </select>
+            <button type="button" onclick="removeThr(this)">X</button>
+        </div>
+    </div>
+    <button type="button" onclick="addThr()">Add Another Hard Restriction</button>
+    <br><br>
+    <!-- END TEACHER HR SECTION -->
+
     <button type="submit">Add Teacher</button>
 </form>
+
+<script>
+    function addThr() {
+        const container = document.getElementById('thrContainer');
+        const original = container.querySelector('.thrItem');
+        const clone = original.cloneNode(true);
+        // clear the cloned inputs
+        clone.querySelectorAll('input').forEach(i => i.value = '');
+        clone.querySelector('select').selectedIndex = 0;
+        container.appendChild(clone);
+    }
+    function removeThr(btn) {
+        const div = btn.closest('.thrItem');
+        if (document.querySelectorAll('.thrItem').length > 1) {
+            div.remove();
+        } else {
+            // just clear fields if only one
+            div.querySelectorAll('input').forEach(i => i.value='');
+            div.querySelector('select').selectedIndex = 0;
+        }
+    }
+</script>
